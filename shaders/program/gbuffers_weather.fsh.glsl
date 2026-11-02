@@ -2497,6 +2497,7 @@ SIMPLE_VARYING vec2 vEntityId;
 
 // 方块/物品的贴图图集。天气、粒子等程序也会绑定这张图集。
 uniform sampler2D gtexture;
+flat SIMPLE_VARYING float vRainDraw;
 
 /* ---------------------------------------------------------------------------
  * 实体叠加色
@@ -2714,12 +2715,7 @@ void main() {
     vec4 texel = texture(gtexture, vTexCoord);
     vec4 albedo = texel * vColor;
     // 保留原生雨雪网格的遮挡和范围。雨幕改用窄条与落下的短滴，雪花保留贴图。
-    // 原生雨图为长条图，雪图为方图；透明纹素不能用于逐片元的雨雪分类。
-    float rain = smoothstep(0.05, 0.20, texel.b - max(texel.r, texel.g));
-#ifdef SIMPLE_VARYING
-    ivec2 weatherSize = textureSize(gtexture, 0);
-    rain = max(rain, step(float(weatherSize.x) * 2.0, float(weatherSize.y)));
-#endif
+    float rain = vRainDraw;
 #if ENABLE_REALISTIC_RAIN == 1
     vec3 world = viewToAbsoluteWorld(vViewPos);
     float lane = vTexCoord.x * 3.0;
@@ -2749,7 +2745,7 @@ void main() {
 
     float shadow = 1.0;   // 雨滴不接收阴影
 
-    // 原版雨图偏蓝、雪图接近中性白，用贴图色差保留雪花自身颜色。
+    // Snow retains the bound sprite and its actual surface illumination.
     vec3 illumination = surfaceAmbient(lmCoord, 1.0)
                       + (getSunLightColor() + getMoonLightColor()) * 0.12;
     float rainIntensity = luma(illumination) * mix(0.6, 1.2, luma(texel.rgb));

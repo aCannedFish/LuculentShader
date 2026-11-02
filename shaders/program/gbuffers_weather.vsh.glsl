@@ -595,7 +595,31 @@ void transformGBuffersVertex(vec3 position, vec3 normal, vec2 texCoord,
 
 
 
+uniform sampler2D gtexture;
+uniform sampler2D gaux2;
+uniform sampler2D gaux3;
+uniform float rainBiome;
+flat SIMPLE_VARYING float vRainDraw;
+
+// Identify the submitted sprite once per vertex. Vanilla rain and snow are
+// both 64x256, and resource packs can change both their colours and dimensions.
+// Ambiguous identical sprites follow the local precipitation classification.
+float nativeRainDraw() {
+    ivec2 size = textureSize(gtexture, 0);
+    bool rain = all(equal(size, textureSize(gaux2, 0)));
+    bool snow = all(equal(size, textureSize(gaux3, 0)));
+    for (int i = 0; i < 16 && rain && snow; ++i) {
+        vec2 point = fract(vec2(0.37, 0.61) + float(i) * vec2(0.381966, 0.618034));
+        ivec2 pixel = min(ivec2(point * vec2(size)), size - 1);
+        vec4 value = texelFetch(gtexture, pixel, 0);
+        rain = all(equal(value, texelFetch(gaux2, pixel, 0)));
+        snow = all(equal(value, texelFetch(gaux3, pixel, 0)));
+    }
+    return rain ? (snow ? step(0.5, rainBiome) : 1.0) : 0.0;
+}
+
 void main() {
+    vRainDraw = nativeRainDraw();
     float alias = mc_Entity.x;
     if (alias >= 6000.0 && alias <= 6010.0) {
         alias = alias == 6000.0 || alias == 6003.0 || alias == 6010.0 ? 101.0 : 102.0;
