@@ -3349,7 +3349,21 @@ void main() {
     // Source alpha packs coverage (bit 0) and cutout class (bit 1). It is not
     // a blend opacity: a leaf hole containing a wall keeps the wall's coverage.
     float cutout = abs(texture(colortex1, uv).a - MAT_FOLIAGE) < 0.025 ? 2.0 : 0.0;
-    vec4 reflectionSource = depth < 0.999999 ? vec4(opaque.rgb, 1.0 + cutout) : vec4(0.0);
+    // Preserve the existing opaque/cutout bands. Their fraction carries the
+    // terrain plane for water intersections. Other draw types have no tag.
+    float face = opaque.a >= 9.0 && opaque.a <= 14.0 ? round(opaque.a - 8.0) : 0.0;
+    int crease = 0;
+    if (face > 0.0) {
+        ivec2 pixel = ivec2(gl_FragCoord.xy);
+        ivec2 last = textureSize(colortex0, 0) - 1;
+        const ivec2 offsets[4] = ivec2[4](ivec2(-1, 0), ivec2(1, 0), ivec2(0, -1), ivec2(0, 1));
+        for (int i = 0; i < 4; ++i) {
+            float other = texelFetch(colortex0, clamp(pixel + offsets[i], ivec2(0), last), 0).a;
+            if (other >= 9.0 && other <= 14.0 && other != opaque.a) crease |= 1 << i;
+        }
+    }
+    vec4 reflectionSource = depth < 0.999999
+        ? vec4(opaque.rgb, 1.0 + cutout + (face * 16.0 + float(crease)) / 256.0) : vec4(0.0);
     vec3 color = fillSkyBackground(opaque.rgb, uv, depth);
     // 方块只保留漫反射/粗糙Glossy，场景辐射仍单独发布给水面使用。
     bool wetActive = ENABLE_RAIN_PUDDLES == 1 && weatherGroundWetness() * RAIN_PUDDLES_STRENGTH > 0.001;

@@ -456,6 +456,7 @@ vec3 shadowClipToUv(vec4 shadowClipPos) {
 
 
 uniform sampler2D gtexture;
+uniform vec4 spriteBounds;
 
 SIMPLE_VARYING vec2 vTexCoord;
 SIMPLE_VARYING vec4 vColor;
@@ -466,25 +467,32 @@ SIMPLE_VARYING float vCaster;
 
 void main() {
     // 在 alpha 丢弃前求导，保证叶片边缘仍有完整的导数四像素组。
-    vec3 plane = cross(dFdx(vShadowPosition), dFdy(vShadowPosition));
+    vec3 dx = dFdx(vShadowPosition);
+    vec3 dy = dFdy(vShadowPosition);
+    vec2 uvDx = dFdx(vTexCoord);
+    vec2 uvDy = dFdy(vTexCoord);
+    vec4 colourDx = dFdx(vColor);
+    vec4 colourDy = dFdy(vColor);
+    vec2 lmDx = dFdx(vCasterLight);
+    vec2 lmDy = dFdy(vCasterLight);
+    vec3 plane = cross(dx, dy);
     float planeScale = max(max(abs(plane.x), abs(plane.y)), abs(plane.z));
-    vec4 albedo = texture(gtexture, vTexCoord) * vColor;
-
-    // 半透明像素直接丢弃，不写深度，也就不会投射阴影。
-    if (albedo.a < alphaTestRef) {
-        discard;
-    }
-
-    // 非线性畸变后的线性深度插值不再落在原始平面上，会产生圆斑状自阴影。
-    // 反解当前纹素位置，再由原始平面求深度；掠射退化三角形保留光栅深度。
+    vec2 uv = vTexCoord;
+    vec4 vertexColour = vColor;
+    vec2 nativeLight = vCasterLight;
     gl_FragDepth = gl_FragCoord.z;
-    if (abs(plane.z) > planeScale * 0.00001) {
+    if (abs(plane.z) > max(1e-20, planeScale * 0.00001)) {
         vec2 distorted = gl_FragCoord.xy / shadowTextureResolution() * 2.0 - 1.0;
-        vec2 original = undistortShadow(distorted);
-        float depth = vShadowPosition.z
-                    - dot(plane.xy, original - vShadowPosition.xy) / plane.z;
-        gl_FragDepth = clamp(depth * 0.5 + 0.5, 0.0, 1.0);
+        vec2 offset = undistortShadow(distorted) - vShadowPosition.xy;
+        // Match material attributes to the very same undistorted position as depth.
+        vec2 screenOffset = inverse(mat2(dx.xy, dy.xy)) * offset;
+        uv += uvDx * screenOffset.x + uvDy * screenOffset.y;
+        vertexColour += colourDx * screenOffset.x + colourDy * screenOffset.y;
+        nativeLight += lmDx * screenOffset.x + lmDy * screenOffset.y;
+        gl_FragDepth = clamp((vShadowPosition.z - dot(plane.xy, offset) / plane.z) * 0.5 + 0.5, 0.0, 1.0);
     }
+    vec4 albedo = textureGrad(gtexture, uv, uvDx, uvDy) * vertexColour;
+    if (albedo.a < alphaTestRef) discard;
 
     // 不透明表面保留原生材质颜色，供反射命中重建使用；alpha 类别不变。
     vec4 caster = vec4(albedo.rgb, 1.0);
@@ -503,13 +511,18 @@ void main() {
     }
     fullOut0 = caster;
     vec2 oct = round(encodeNormal(normalize(vCasterNormal)) * 255.0);
-    vec2 levels = round(vCasterLight * 15.0);
-    // Use texture-space phase from the actually bound sprite. This also works
-    // when OptiFine submits individual textures rather than the block atlas.
-    vec2 phase = floor(fract(vTexCoord * vec2(textureSize(gtexture, 0)) / 16.0) * 256.0);
-    vec3 rgb = round(clamp(albedo.rgb, 0.0, 1.0) * 255.0);
-    vec3 record = vec3(rgb.xy + oct * 256.0 + phase * 65536.0,
-        rgb.z + (levels.x + levels.y * 16.0) * 256.0 + (vCaster > 3.5 ? 65536.0 : 0.0));
+    vec2 levels = round(clamp(nativeLight, 0.0, 1.0) * 15.0);
+    bool terrain = renderStage == 8 || renderStage == 9 || renderStage == 16;
+    vec2 extent = spriteBounds.zw - spriteBounds.xy;
+    bool localSprite = all(greaterThan(extent, vec2(0.0)))
+        && any(notEqual(textureSize(gtexture, 0), atlasSize));
+    vec2 atlasUv = localSprite ? spriteBounds.xy + clamp(uv, 0.0, 1.0) * extent : uv;
+    vec2 address = round(clamp(atlasUv, 0.0, 1.0) * 65535.0);
+    vec4 tint = round(clamp(vec4(terrain ? vertexColour.rgb : albedo.rgb, vertexColour.a), 0.0, 1.0) * 15.0);
+    float packedTint = dot(tint, vec4(1.0, 16.0, 256.0, 4096.0));
+    vec3 record = vec3(address + oct * 65536.0, packedTint + (levels.x + levels.y * 16.0) * 65536.0);
+    if (!terrain) record.x = -1.0 - record.x;
+    if (vCaster > 3.5) record.y = -1.0 - record.y;
     float opaque = vCaster > 1.5 && vCaster < 3.5 ? 0.0 : 1.0;
     fullOut1 = vec4(record * opaque, opaque);
 }

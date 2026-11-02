@@ -3223,7 +3223,21 @@ vec3 computePbrLighting(LabPbrMaterial pbr, vec3 normal, vec2 lightmap, vec3 sha
 
 
 
+// Tag only genuinely axis-aligned raster faces. Derivatives are taken before
+// alpha rejection, so a cutout or an adjacent stair cannot tilt this plane.
+float waterFaceTag(vec3 viewPosition) {
+    vec3 normal = mat3(gbufferModelViewInverse) * cross(dFdx(viewPosition), dFdy(viewPosition));
+    float area = length(normal);
+    if (area < 1e-12) return 0.0;
+    normal /= area;
+    if (abs(normal.x) > 0.99995) return normal.x > 0.0 ? 1.0 : 2.0;
+    if (abs(normal.y) > 0.99995) return normal.y > 0.0 ? 3.0 : 4.0;
+    if (abs(normal.z) > 0.99995) return normal.z > 0.0 ? 5.0 : 6.0;
+    return 0.0;
+}
+
 void main() {
+    float receiverFace = waterFaceTag(vViewPos);
     /* =======================================================================
      * 第一步：材质颜色（Albedo）
      * ====================================================================
@@ -3349,6 +3363,8 @@ void main() {
      * 透明贴图已在前面执行裁剪，不能把其边缘小数 alpha 当作几何覆盖率。
      */
     writeGBuffers(color, normalView, lmCoord, shadow, material, foliage ? 3.0 : 1.0);
+    // C0 is opaque here. Deferred consumes the tag before publishing scene alpha.
+    fullOut0.a = 8.0 + receiverFace;
     fullOut2.a = pbr.metallic;
     fullOut3 = vec4(pbr.f0, sqrt(pbr.roughness));
 

@@ -1710,6 +1710,67 @@ SIMPLE_VARYING vec2 vCasterLight;
 // 投影体类别：0 不透明，1 发光方块，2 透光玻璃，3 水，4 薄植被。
 SIMPLE_VARYING float vCaster;
 
+uniform vec4 spriteBounds;
+#if ENABLE_COLOURED_LIGHTING == 0 && GI_QUALITY == 0
+layout(r32ui, binding=5) uniform uimage2D colorimg5;
+#endif
+#include "/lib/water_face_cache.glsl"
+
+// Capture only native solid and alpha-tested terrain. Each corner
+// carries its own active atlas UV, tint, AO and light levels.
+void waterCaptureFace(vec3 centre, vec3 normal) {
+#if SIMPLE_DIMENSION == 0 && ENABLE_SHADOWS == 1
+    if (renderStage != 8 && renderStage != 9) return;
+    ivec3 cell = ivec3(floor(centre)) - waterFaceOrigin();
+    if (!waterFaceInside(cell)) return;
+    vec3 n = abs(normal);
+    int axis = n.x > max(n.y, n.z) ? 0 : (n.y > n.z ? 1 : 2);
+    if (n[axis] < 0.9999) return;
+    vec3 offset = -at_midBlock / 64.0;
+    if (abs(offset[axis] - sign(normal[axis]) * 0.5) > 0.001) return;
+    vec2 local = waterFaceAxes(offset, axis);
+    int face = waterFaceRecord(cell, axis, normal[axis] < 0.0);
+    if (any(greaterThan(abs(abs(local) - 0.5), vec2(0.001)))) {
+        imageAtomicOr(colorimg5, waterFaceAddress(face, 2), 16u);
+        imageAtomicOr(colorimg5, waterFaceAddress(face, 3), 16u);
+        return;
+    }
+    int corner = int(local.x > 0.0) + 2 * int(local.y > 0.0);
+    vec2 extent = spriteBounds.zw - spriteBounds.xy;
+    bool single = all(greaterThan(extent, vec2(0.0))) && any(notEqual(textureSize(gtexture, 0), atlasSize));
+    vec2 uv = single ? spriteBounds.xy + vaUV0 * extent : vaUV0;
+    vec2 middle = single ? spriteBounds.xy + mc_midTexCoord * extent : mc_midTexCoord;
+    uint key = packUnorm2x16(clamp(middle, 0.0, 1.0)) + 1u;
+    // A grass side can have a cutout overlay on top of its opaque base.
+    // Keep distinct native sprites separate even if their geometry coincides.
+    int layer = 0;
+    uint existing = imageAtomicCompSwap(colorimg5, waterFaceAddress(face, 0), 0u, key);
+    if (existing != 0u && existing != key) {
+        layer = 1;
+        existing = imageAtomicCompSwap(colorimg5, waterFaceAddress(face, 1), 0u, key);
+        if (existing != 0u && existing != key) {
+            imageAtomicOr(colorimg5, waterFaceAddress(face, 2), 16u);
+            imageAtomicOr(colorimg5, waterFaceAddress(face, 3), 16u);
+            return;
+        }
+    }
+    float priority = 0.0;
+    if (renderStage == 9) {
+        vec2 pixels = abs(vaUV0 - mc_midTexCoord) * 2.0 * vec2(textureSize(gtexture, 0));
+        float lod = log2(max(max(pixels.x, pixels.y), 1.0));
+        priority = 1.0 + round(14.0 * (1.0 - textureLod(gtexture, mc_midTexCoord, lod).a));
+    }
+    uvec3 tint = uvec3(round(clamp(vaColor.rgb, 0.0, 1.0) * vec3(31, 63, 31)));
+    uint ao = uint(round(clamp(vaColor.a < 0.1 ? 1.0 : vaColor.a, 0.0, 1.0) * 15.0));
+    uvec2 lm = uvec2(round(clamp(vec2(vaUV2) / 240.0, 0.0, 1.0) * 15.0));
+    uint attributes = tint.x | (tint.y << 5u) | (tint.z << 11u) | (ao << 16u)
+        | (lm.x << 20u) | (lm.y << 24u) | (uint(priority) << 28u);
+    imageAtomicExchange(colorimg5, waterFaceAddress(face, 4 + layer * 8 + corner), packUnorm2x16(uv));
+    imageAtomicExchange(colorimg5, waterFaceAddress(face, 8 + layer * 8 + corner), attributes);
+    imageAtomicOr(colorimg5, waterFaceAddress(face, 2 + layer), 1u << uint(corner));
+#endif
+}
+
 void main() {
 #if ENABLE_COLOURED_LIGHTING == 1 || GI_QUALITY > 0
     vec3 lpvCentre = (shadowModelViewInverse * modelViewMatrix
@@ -1757,6 +1818,9 @@ void main() {
     // 4. 透传贴图坐标与顶点颜色，供片元着色器做 alpha 测试
     vTexCoord = vaUV0;
     vCasterNormal = mat3(shadowModelViewInverse) * normalMatrix * vaNormal;
+    vec3 nativeCentre = (shadowModelViewInverse * modelViewMatrix
+        * vec4(vaPosition + modelOffset, 1.0)).xyz + cameraPosition + at_midBlock / 64.0;
+    waterCaptureFace(nativeCentre, normalize(vCasterNormal));
     vCasterLight = clamp(vec2(vaUV2) / 240.0, 0.0, 1.0);
     vColor = vaColor;
     if (vColor.a < 0.1) {

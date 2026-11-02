@@ -26,6 +26,48 @@ float waterTileExit(vec2 start, vec2 direction, ivec2 pixel, int side) {
     return min(next.x, next.y);
 }
 
+// At a shared crease the centre sample covers only one of two faces.
+// Intersect both tagged planes, clip each to the side occupied by its native
+// sample, and return a colour footprint on the winning face.
+WaterRayHit waterCreaseHit(ivec2 pixel, vec3 point, vec3 normal, int mask,
+                          vec3 origin, vec3 ray, float limit, sampler2D depths, vec2 size) {
+    const ivec2 offsets[4] = ivec2[4](ivec2(-1, 0), ivec2(1, 0), ivec2(0, -1), ivec2(0, 1));
+    float d = dot(normal, ray);
+    float centreT = d < -0.0001 ? dot(normal, point - origin) / d : -1.0;
+    vec3 centreHit = origin + ray * centreT;
+    vec2 centrePixel = waterProjectPixel(centreHit, size);
+    bool centreOK = centreT > 0.0005 && centreT <= limit
+        && all(lessThanEqual(abs(centrePixel - vec2(pixel) - 0.5), vec2(0.501)));
+    float nearest = limit + 1.0;
+    vec2 uv = vec2(0.0);
+    for (int i = 0; i < 4; ++i) {
+        if ((mask & (1 << i)) == 0) continue;
+        ivec2 neighbour = clamp(pixel + offsets[i], ivec2(0), ivec2(size) - 1);
+        vec2 otherUv = (vec2(neighbour) + 0.5) / size;
+        vec3 other = screenToView(otherUv, texelFetch(depths, neighbour, 0).r);
+        vec3 side = mat3(gbufferModelView) * waterAxisNormal(texelFetch(colortex6, neighbour, 0).a);
+        if (abs(dot(side, normal)) > 0.1) continue;
+        float reach = abs(point.z) * abs(gbufferProjectionInverse[1][1]) * 4.0 / size.y;
+        float facing = min(abs(dot(normal, normalize(point))), abs(dot(side, normalize(other))));
+        if (length(other - point) > min(0.35, reach / max(facing, 0.02))) continue;
+        float firstSide = dot(point - other, side);
+        float secondSide = dot(other - point, normal);
+        if (dot(centreHit - other, side) * sign(firstSide) < -0.0001) centreOK = false;
+        float denominator = dot(side, ray);
+        if (denominator >= -0.0001) continue;
+        float t = dot(side, other - origin) / denominator;
+        if (t <= 0.0005 || t > limit || t >= nearest) continue;
+        vec3 hit = origin + ray * t;
+        if (dot(hit - point, normal) * sign(secondSide) < -0.0001) continue;
+        vec2 projected = waterProjectPixel(hit, size);
+        if (any(greaterThan(abs(projected - vec2(pixel) - 0.5), vec2(0.501)))) continue;
+        nearest = t;
+        uv = clamp(projected, vec2(neighbour) + 0.001, vec2(neighbour) + 0.999) / size;
+    }
+    if (centreOK && centreT < nearest) return WaterRayHit(centrePixel / size, centreT, false);
+    return WaterRayHit(uv, nearest <= limit ? nearest : -1.0, false);
+}
+
 WaterRayHit traceWaterGeometry(vec2 uv, vec3 origin, vec3 direction, float range, sampler2D depths) {
     vec2 size = vec2(textureSize(depths, 0));
     if (direction.z > 0.001) range = min(range, (-near * 1.02 - origin.z) / direction.z);
@@ -74,11 +116,30 @@ WaterRayHit traceWaterGeometry(vec2 uv, vec3 origin, vec3 direction, float range
                 vec3 point = screenToView(centre, depth);
                 vec3 normal = mat3(gbufferModelView) * waterBedNormal(centre, point, depths);
                 float denominator = dot(normal, direction);
-                if (abs(denominator) > 0.0001) {
+                float flags = texelFetch(colortex6, pixel, 0).a;
+                bool cutout = flags > 2.5;
+                // A labelled opaque back face exits a solid. A ray starting in
+                // water must have encountered an unseen entrance before it.
+                bool backFace = !cutout && fract(flags) > 0.0 && denominator >= 0.0;
+                float rayZ = 1.0 / (reciprocal + 0.5 * (cursor + next) * slope);
+                hidden = hidden || backFace || rayZ + point.z > max(0.008, rayZ * 0.001);
+                int crease = int(round(fract(flags) * 256.0)) & 15;
+                if (crease != 0 && !cutout) {
+                    WaterRayHit edge = waterCreaseHit(pixel, point, normal, crease, origin, direction, range, depths, size);
+                    if (edge.distance > 0.0) {
+                        edge.hidden = hidden;
+                        return edge;
+                    }
+                } else if (!backFace && abs(denominator) > 0.0001) {
                     float t = dot(normal, point - origin) / denominator;
                     if (t > 0.0005 && t <= range) {
-                        vec2 projected = waterProjectPixel(origin + direction * t, size);
-                        if (all(lessThanEqual(abs(projected - vec2(pixel) - 0.5), vec2(0.501)))) {
+                        vec3 intersection = origin + direction * t;
+                        vec2 projected = waterProjectPixel(intersection, size);
+                        // A single depth texel in an alpha-tested leaf cannot
+                        // support a long surface stretched down the bank.
+                        float radius = max(0.012, -point.z * abs(gbufferProjectionInverse[1][1]) * 4.0 / size.y);
+                        bool supported = !cutout || length(intersection - point) <= radius;
+                        if (supported && all(lessThanEqual(abs(projected - vec2(pixel) - 0.5), vec2(0.501)))) {
                             return WaterRayHit(projected / size, t, hidden);
                         }
                     }
