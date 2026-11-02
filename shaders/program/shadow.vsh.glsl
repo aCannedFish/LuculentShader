@@ -1707,6 +1707,7 @@ SIMPLE_VARYING vec3 vShadowPosition;
 // Surface orientation and light levels belong to the same native alpha-tested texel.
 SIMPLE_VARYING vec3 vCasterNormal;
 SIMPLE_VARYING vec2 vCasterLight;
+flat SIMPLE_VARYING int vWaterFaceParity;
 // 投影体类别：0 不透明，1 发光方块，2 透光玻璃，3 水，4 薄植被。
 SIMPLE_VARYING float vCaster;
 
@@ -1721,15 +1722,17 @@ layout(r32ui, binding=5) uniform uimage2D colorimg5;
 void waterCaptureFace(vec3 centre, vec3 normal) {
 #if SIMPLE_DIMENSION == 0 && ENABLE_SHADOWS == 1
     if (renderStage != 8 && renderStage != 9) return;
-    ivec3 cell = ivec3(floor(centre)) - waterFaceOrigin();
-    if (!waterFaceInside(cell)) return;
+    ivec3 owner = ivec3(floor(centre));
+    ivec3 cell = owner - waterFarOrigin();
+    if (!waterFarInside(cell)) return;
     vec3 n = abs(normal);
     int axis = n.x > max(n.y, n.z) ? 0 : (n.y > n.z ? 1 : 2);
     if (n[axis] < 0.9999) return;
     vec3 offset = -at_midBlock / 64.0;
     if (abs(offset[axis] - sign(normal[axis]) * 0.5) > 0.001) return;
     vec2 local = waterFaceAxes(offset, axis);
-    int face = waterFaceRecord(cell, axis, normal[axis] < 0.0);
+    int face = waterFindFace(owner, axis, normal[axis] < 0.0, true);
+    if (face < 0) return;
     if (any(greaterThan(abs(abs(local) - 0.5), vec2(0.001)))) {
         imageAtomicOr(colorimg5, waterFaceAddress(face, 2), 16u);
         imageAtomicOr(colorimg5, waterFaceAddress(face, 3), 16u);
@@ -1767,7 +1770,12 @@ void waterCaptureFace(vec3 centre, vec3 normal) {
         | (lm.x << 20u) | (lm.y << 24u) | (uint(priority) << 28u);
     imageAtomicExchange(colorimg5, waterFaceAddress(face, 4 + layer * 8 + corner), packUnorm2x16(uv));
     imageAtomicExchange(colorimg5, waterFaceAddress(face, 8 + layer * 8 + corner), attributes);
-    imageAtomicOr(colorimg5, waterFaceAddress(face, 2 + layer), 1u << uint(corner));
+    uint previous = imageAtomicOr(colorimg5, waterFaceAddress(face, 2 + layer), 1u << uint(corner));
+    if (previous == 0u) {
+        imageAtomicOr(colorimg5, waterMacroAddress(waterMacroIndex(cell)), 1u << uint(cell.y & 3));
+        imageAtomicMax(colorimg5, waterColumnAddress(waterColumnIndex(cell,4)), uint(cell.y+1));
+        imageAtomicMax(colorimg5, waterColumnAddress(waterColumnIndex(cell,16)), uint(cell.y+1));
+    }
 #endif
 }
 
@@ -1821,6 +1829,9 @@ void main() {
     vec3 nativeCentre = (shadowModelViewInverse * modelViewMatrix
         * vec4(vaPosition + modelOffset, 1.0)).xyz + cameraPosition + at_midBlock / 64.0;
     waterCaptureFace(nativeCentre, normalize(vCasterNormal));
+    ivec3 parity = ivec3(floor(nativeCentre)) & 1;
+    vWaterFaceParity = (renderStage == 8 || renderStage == 9) && all(lessThanEqual(abs(at_midBlock), vec3(32.01)))
+        ? parity.x + 2 * parity.y + 4 * parity.z : -1;
     vCasterLight = clamp(vec2(vaUV2) / 240.0, 0.0, 1.0);
     vColor = vaColor;
     if (vColor.a < 0.1) {

@@ -20,11 +20,75 @@ int waterFaceRecord(ivec3 cell, int axis, bool negative) {
     return index * 6 + 2 * axis + int(negative);
 }
 
-ivec2 waterFaceAddress(int record, int word) {
+// Keep the dense waterbed records near the eye. Farther native faces use
+// exact keys in a bounded sparse table; an occupied hash slot alone is never
+// evidence of geometry. Coarse occupancy only accelerates empty ray segments.
+const ivec3 waterFarSize = ivec3(128, 64, 128);
+const ivec3 waterMacroSize = ivec3(32, 16, 32);
+const int waterFarSlots = 65536;
+const int waterMacroCount = 16384;
+const int waterColumnCount = 1088;
+const int waterTotalFaces = waterFaceCount + waterFarSlots;
+
+ivec3 waterFarOrigin() {
+    return ivec3(floor(cameraPosition)) - waterFarSize / 2;
+}
+
+bool waterFarInside(ivec3 local) {
+    return all(greaterThanEqual(local, ivec3(0))) && all(lessThan(local, waterFarSize));
+}
+
+ivec2 waterStorageAddress(int offset) {
     ivec2 size = imageSize(colorimg5);
     int end = (size.y - 1) * size.x;
-    int address = end - waterFaceCount * waterFaceWords + record * waterFaceWords + word;
+    int address = end - waterTotalFaces * waterFaceWords - waterFarSlots - waterMacroCount - waterColumnCount + offset;
     return ivec2(address % size.x, address / size.x);
+}
+
+ivec2 waterFaceAddress(int record, int word) {
+    return waterStorageAddress(record * waterFaceWords + word);
+}
+
+ivec2 waterKeyAddress(int slot) {
+    return waterStorageAddress(waterTotalFaces * waterFaceWords + slot);
+}
+
+ivec2 waterMacroAddress(int index) {
+    return waterStorageAddress(waterTotalFaces * waterFaceWords + waterFarSlots + index);
+}
+
+// Maximum occupied cell height in each horizontal 4x4 and 16x16 column.
+ivec2 waterColumnAddress(int index) {
+    return waterStorageAddress(waterTotalFaces * waterFaceWords + waterFarSlots + waterMacroCount + index);
+}
+
+int waterColumnIndex(ivec3 cell, int side) {
+    return (side == 16 ? 1024 : 0) + cell.x / side + (128 / side) * (cell.z / side);
+}
+
+int waterMacroIndex(ivec3 local) {
+    ivec3 macro = local / 4;
+    return macro.x + waterMacroSize.x * (macro.y + waterMacroSize.y * macro.z);
+}
+
+int waterFindFace(ivec3 owner, int axis, bool negative, bool create) {
+    ivec3 nearCell = owner - waterFaceOrigin();
+    if (waterFaceInside(nearCell)) return waterFaceRecord(nearCell, axis, negative);
+    ivec3 cell = owner - waterFarOrigin();
+    if (!waterFarInside(cell)) return -1;
+    uint key = uint(6 * (cell.x + waterFarSize.x * (cell.y + waterFarSize.y * cell.z))
+        + 2 * axis + int(negative) + 1);
+    uint hash = (key ^ (key >> 16u)) * 0x7feb352du;
+    hash = (hash ^ (hash >> 15u)) * 0x846ca68bu;
+    int home = int((hash ^ (hash >> 16u)) & uint(waterFarSlots - 1));
+    for (int probe = 0; probe < 8; ++probe) {
+        int slot = (home + probe) & (waterFarSlots - 1);
+        ivec2 address = waterKeyAddress(slot);
+        uint entry = create ? imageAtomicCompSwap(colorimg5, address, 0u, key) : imageLoad(colorimg5, address).r;
+        if (entry == key || (create && entry == 0u)) return waterFaceCount + slot;
+        if (!create && entry == 0u) break;
+    }
+    return -1;
 }
 
 vec2 waterFaceAxes(vec3 v, int axis) {

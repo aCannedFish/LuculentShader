@@ -4077,7 +4077,19 @@ vec3 waterCasterRecord(ivec2 pixel) {
 }
 
 vec3 waterRecordNormal(vec3 record) {
-    return decodeNormal(floor(record.xy / 65536.0) / 255.0);
+    vec2 encoded = floor(record.xy / 65536.0);
+    if (encoded.x < 255.0) return decodeNormal(encoded / vec2(254.0, 255.0));
+    int code = int(encoded.y) & 7;
+    vec3 normal = vec3(0.0);
+    normal[code / 2] = (code & 1) == 0 ? 1.0 : -1.0;
+    return normal;
+}
+
+bool waterCasterOwns(vec3 record, vec3 point, vec3 normal) {
+    vec2 label = floor(record.xy / 65536.0);
+    if (label.x < 255.0) return true;
+    ivec3 cell = ivec3(floor(point + cameraPosition - 0.004 * normal)) & 1;
+    return (int(label.y) >> 3) == cell.x + 2 * cell.y + 4 * cell.z;
 }
 
 vec3 waterCasterNormal(vec2 uv) {
@@ -4098,7 +4110,8 @@ vec3 waterCasterAlbedo(ivec2 pixel, vec3 record, vec3 normal, vec3 hit) {
         for (int side = -1; side <= 1; side += 2) {
             ivec2 tap = clamp(pixel + side * stride, ivec2(0), size - 1);
             vec3 neighbour = waterCasterRecord(tap);
-            if (dot(normal, waterRecordNormal(neighbour)) < 0.96) continue;
+            if (!waterCasterOwns(neighbour, hit, normal)
+                || dot(normal, waterRecordNormal(neighbour)) < 0.96) continue;
             vec2 centre = (vec2(tap) + 0.5) / vec2(size);
             vec3 point = waterShadowPoint(centre, texelFetch(shadowtex1, tap, 0).r);
             if (abs(dot(point - hit, normal)) > 0.015) continue;
@@ -4189,7 +4202,9 @@ bool waterSunIntersection(vec3 originView, vec3 directionView, float maximum,
         depth = textureLod(shadowtex1, pixel, 0.0).r;
         if (depth >= 0.999999) continue;
         vec3 observed = waterShadowPoint(pixel, depth);
-        vec3 observedNormal = waterCasterNormal(pixel);
+        vec3 observedRecord = waterCasterRecord(ivec2(pixel * vec2(textureSize(shadowcolor1, 0))));
+        vec3 observedNormal = waterRecordNormal(observedRecord);
+        if (!waterCasterOwns(observedRecord, hit, observedNormal)) continue;
         if (abs(dot(hit - observed, observedNormal)) > 0.018
             || length(hit - observed) > 0.35 || dot(normal, observedNormal) < 0.96) continue;
         nearest = t;
@@ -4407,18 +4422,33 @@ vec4 queryWaterRadiance(vec3 position, vec3 direction, float roughness, float sk
     WaterRayHit hit = traceWaterGeometry(uv, position, direction, far, depthtex1);
     bool visible = hit.distance > 0.0 && !waterReflectionSubmerged(hit.uv, position);
     float maximum = visible ? max(hit.distance - 0.05, 0.0) : far;
-    float sunDistance;
-    // Only a segment hidden from the camera can contain an earlier unseen face.
-    vec4 sunView = REFLECTION_OCCLUSION_STEPS > 0 && (!visible || hit.hidden)
-        ? waterSunViewHit(position, direction, maximum, sunDistance) : vec4(0.0);
-    if (sunView.a > 0.0) {
-        vec2 witness;
-        if (waterCameraSees(position + direction * sunDistance, witness)) {
-            vec4 colour = filteredWaterReflection(witness, sunDistance,
-                reflectionSceneDepth(depthtex1, witness), roughness);
-            if (colour.a > 0.0) sunView.rgb = colour.rgb;
+    if (!visible || hit.hidden) {
+        float sunDistance = -1.0;
+        vec2 sunPixel;
+        bool sunHit = REFLECTION_OCCLUSION_STEPS > 0
+            && waterSunIntersection(position, direction, maximum, sunDistance, sunPixel);
+        float faceDistance;
+        vec4 nativeFace = waterNearFaceHit(position, direction,
+            min(sunHit ? sunDistance + 0.015 : maximum, 96.0), faceDistance);
+        if (nativeFace.a > 0.0) {
+            vec2 witness;
+            if (waterCameraSees(position + direction * faceDistance, witness)) {
+                vec4 colour = filteredWaterReflection(witness, faceDistance,
+                    reflectionSceneDepth(depthtex1, witness), roughness);
+                if (colour.a > 0.0) nativeFace.rgb = colour.rgb;
+            }
+            return vec4(reflectionAirMedium(nativeFace.rgb, faceDistance, direction), 1.0);
         }
-        return vec4(reflectionAirMedium(sunView.rgb, sunDistance, direction), 1.0);
+        if (sunHit) {
+            vec2 witness;
+            vec3 sunColour = waterCasterRadiance(sunPixel, position + direction * sunDistance).rgb;
+            if (waterCameraSees(position + direction * sunDistance, witness)) {
+                vec4 colour = filteredWaterReflection(witness, sunDistance,
+                    reflectionSceneDepth(depthtex1, witness), roughness);
+                if (colour.a > 0.0) sunColour = colour.rgb;
+            }
+            return vec4(reflectionAirMedium(sunColour, sunDistance, direction), 1.0);
+        }
     }
     if (visible) {
         vec4 sampleColor = filteredWaterReflection(hit.uv, hit.distance,
@@ -4647,7 +4677,11 @@ vec3 applyWaterReflection(vec3 color, vec2 uv, float normalVariance) {
     vec3 direction = normalize(reflect(incident, reflectionNormal));
     float visibility = reflectionGeometricVisibility(dot(geometricNormal, -incident),
         dot(geometricNormal, direction), roughness);
-    float weight = waterFresnel(dot(reflectionNormal, -incident), roughness)
+    // A pixel resolves short ripples in the Fresnel response before they can
+    // carry a coherent displaced image of a distant tree or cliff.
+    float detail = clamp(0.32 * WATER_WAVE_STRENGTH, 0.0, 0.65);
+    vec3 energyNormal = normalize(mix(reflectionNormal, normal, detail));
+    float weight = waterFresnel(dot(energyNormal, -incident), roughness)
         * WATER_REFLECTION_STRENGTH * visibility;
     if (dot(reflectionNormal, -incident) <= 0.0) weight = 0.0;
     if (weight > 0.001) {

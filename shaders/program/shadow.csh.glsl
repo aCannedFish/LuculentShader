@@ -6,21 +6,24 @@ layout(r32ui, binding=5) uniform uimage2D colorimg5;
 layout(local_size_x=256) in;
 #if ENABLE_COLOURED_LIGHTING == 1 || GI_QUALITY > 0
 #if COLOURED_VOLUME_SIZE == 32
-const ivec3 workGroups = ivec3(384, 1, 1);
+const ivec3 workGroups = ivec3(640, 1, 1);
 #elif COLOURED_VOLUME_SIZE == 48
-const ivec3 workGroups = ivec3(384, 1, 1);
+const ivec3 workGroups = ivec3(640, 1, 1);
 #elif COLOURED_VOLUME_SIZE == 64
-const ivec3 workGroups = ivec3(512, 1, 1);
+const ivec3 workGroups = ivec3(640, 1, 1);
 #else
 const ivec3 workGroups = ivec3(1728, 1, 1);
 #endif
 #else
-const ivec3 workGroups = ivec3(384, 1, 1);
+const ivec3 workGroups = ivec3(640, 1, 1);
 #endif
 void main() {
 #if SIMPLE_DIMENSION == 0 && ENABLE_SHADOWS == 1
     int face = int(gl_GlobalInvocationID.x);
-    if (face < waterFaceCount) {
+    if (face < waterColumnCount) imageStore(colorimg5, waterColumnAddress(face), uvec4(0));
+    if (face < waterMacroCount) imageStore(colorimg5, waterMacroAddress(face), uvec4(0u));
+    if (face < waterFarSlots) imageStore(colorimg5, waterKeyAddress(face), uvec4(0u));
+    if (face < waterTotalFaces) {
         for (int word = 0; word < 4; ++word) imageStore(colorimg5, waterFaceAddress(face, word), uvec4(0u));
     }
     if (face == 0) imageStore(colorimg5, ivec2(17, imageSize(colorimg5).y - 1), uvec4(uint(frameCounter) + 1u));

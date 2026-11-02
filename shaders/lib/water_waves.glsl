@@ -14,11 +14,11 @@ vec3 waterWavePhase(vec2 world, float time) {
 }
 
 float getWaterWaveHeight(vec2 world, float time) {
-    return dot(sin(waterWavePhase(world, time)), waterWaveAmplitude);
+    return dot(sin(waterWavePhase(world, time)), waterWaveAmplitude) * WATER_WAVE_STRENGTH;
 }
 
 vec3 getWaterWaveNormal(vec2 world, float time) {
-    vec3 scale = cos(waterWavePhase(world, time)) * waterWaveAmplitude;
+    vec3 scale = cos(waterWavePhase(world, time)) * waterWaveAmplitude * WATER_WAVE_STRENGTH;
     vec2 slope = scale.x * waterWaveA + scale.y * waterWaveB + scale.z * waterWaveC;
     return normalize(vec3(-slope.x, 1.0, -slope.y));
 }

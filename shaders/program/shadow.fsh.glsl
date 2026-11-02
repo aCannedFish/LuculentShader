@@ -463,6 +463,7 @@ SIMPLE_VARYING vec4 vColor;
 SIMPLE_VARYING vec3 vShadowPosition;
 SIMPLE_VARYING vec3 vCasterNormal;
 SIMPLE_VARYING vec2 vCasterLight;
+flat SIMPLE_VARYING int vWaterFaceParity;
 SIMPLE_VARYING float vCaster;
 
 void main() {
@@ -510,7 +511,16 @@ void main() {
         caster = vec4(albedo.rgb, 0.75);
     }
     fullOut0 = caster;
-    vec2 oct = round(encodeNormal(normalize(vCasterNormal)) * 255.0);
+    // A shadow texel can straddle a native block edge. Retain its submitted
+    // owner, even when nonlinear rasterization places the texel past that edge.
+    vec3 faceNormal = normalize(vCasterNormal);
+    vec2 oct = round(encodeNormal(faceNormal) * vec2(254.0, 255.0));
+    vec3 axisWeight = abs(faceNormal);
+    int axis = axisWeight.x > max(axisWeight.y, axisWeight.z) ? 0 : (axisWeight.y > axisWeight.z ? 1 : 2);
+    if (vWaterFaceParity >= 0 && axisWeight[axis] > 0.99995) {
+        int axisCode = axis * 2 + int(faceNormal[axis] < 0.0);
+        oct = vec2(255.0, float(vWaterFaceParity * 8 + axisCode));
+    }
     vec2 levels = round(clamp(nativeLight, 0.0, 1.0) * 15.0);
     bool terrain = renderStage == 8 || renderStage == 9 || renderStage == 16;
     vec2 extent = spriteBounds.zw - spriteBounds.xy;

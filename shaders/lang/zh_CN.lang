@@ -237,3 +237,5 @@ option.GI_REFLECTANCE.comment=后续反弹的能量保留比例，与材质颜�
 option.ENABLE_COLOURED_LIGHTING.comment=启用附近光源的彩色直射；关闭后保留普通方块照明。GI开启时仍运行共享体素计算。
 option.COLOURED_VOLUME_SIZE.comment=GI和彩光共享的水平边长，竖直范围为一半；范围外保留原有环境光和方块照明。
 option.COLOURED_LIGHT_STEPS.comment=每帧传播次数；增加后光照随移动和编辑收敛更快。
+option.WATER_WAVE_STRENGTH = 水波强度
+option.WATER_WAVE_STRENGTH.comment = 调整波高和水面细波的明暗对比。

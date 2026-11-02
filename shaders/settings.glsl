@@ -363,6 +363,11 @@ const vec4 colortex9ClearColor = vec4(0.0, 0.0, 0.0, 0.0);
 #define ENABLE_WATER_WAVES 1 // [0 1]
 #endif
 
+// Physical displacement controls the coherent rays. Surface detail also varies
+// reflected energy and glints without steering the entire scenery by each ripple.
+#define WATER_WAVE_STRENGTH 1.5 // [0.5 0.75 1.0 1.25 1.5 1.75 2.0]
+
+
 
 // 无贴图水面保留暗青底色、少量群系染色、透明度与波浪；水的观感主要来自倒影。
 #ifndef ENABLE_WATER_TEXTURE

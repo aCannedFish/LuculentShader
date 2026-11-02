@@ -242,3 +242,5 @@ option.GI_REFLECTANCE.comment=Energy retained by later surface reflections, mult
 option.ENABLE_COLOURED_LIGHTING.comment=Enable direct light colors. Ordinary block lighting remains when disabled; GI retains shared voxel work.
 option.COLOURED_VOLUME_SIZE.comment=Shared GI and colored-light horizontal extent; vertical extent is half. Existing lighting remains outside.
 option.COLOURED_LIGHT_STEPS.comment=Updates per frame. More updates converge faster after movement and block edits.
+option.WATER_WAVE_STRENGTH = Wave strength
+option.WATER_WAVE_STRENGTH.comment = Controls moving wave height and visible ripple contrast.
