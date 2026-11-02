@@ -125,7 +125,7 @@ const int colortex4Format = RGBA16F;
 const int colortex9Format = RGBA32F;
 // colortex6：deferred 保存的、不含透明水体的 HDR 场景。
 const int colortex6Format = RGBA16F;
-// colortex7：水的局部散射辐射与有效标记，薄层不透明度另存 colortex1.g。
+// colortex7：水面片元写入散射色。composite10 消费后复用为透射辐射与可验证的水底面标记。
 const int colortex7Format = RGBA16F;
 // 单纹素介质历史，只保存相机水深、天光与帧号。
 const int colortex13Format = RGBA32F;

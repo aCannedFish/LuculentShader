@@ -5,7 +5,11 @@ layout(location=2) out vec4 fullOut2;
 layout(location=3) out vec4 fullOut3;
 layout(location=4) out vec4 fullOut4;
 /* composite2.fsh: sky, water optics and depth-aware volume reconstruction. */
+#ifdef WATER_TRANSMISSION_PASS
+/* RENDERTARGETS: 7 */
+#else
 /* RENDERTARGETS: 0 */
+#endif
 const bool colortex6MipmapEnabled = false;
 /*
  * Single-scattering volumetric cloud integration with approximate multiple
@@ -4516,10 +4520,13 @@ bool waterCameraSeesBed(vec3 hit, vec3 normalWorld, out vec2 uv) {
     return waterSharesFaceBlock(viewToAbsoluteWorld(samplePoint), viewToAbsoluteWorld(hit), axis);
 }
 
+#include "/lib/water_bed_coverage.glsl"
+
 // Resolve one covered point of the interface. Extra samples at a crease
 // independently trace and shade their first hits; coordinates never blend.
 vec3 transmitWaterSample(vec2 uv, vec3 position, vec3 opticalNormal, vec4 surface,
-                         vec4 scattering) {
+                         vec4 scattering, out float faceTag) {
+    faceTag = 0.0;
     bool edge;
     vec3 originWorld = viewToAbsoluteWorld(position);
     vec3 incident = normalize(position);
@@ -4576,6 +4583,7 @@ vec3 transmitWaterSample(vec2 uv, vec3 position, vec3 opticalNormal, vec4 surfac
     if (alternateBed.a > 0.0) {
         opaqueWorld = viewToAbsoluteWorld(position + ray * alternateDistance);
         receiverNormal = alternateNormal;
+        faceTag = waterBedFaceTag(opaqueWorld, receiverNormal, waterDistance);
     } else {
         waterDistance = bedHit.distance >= 0.0 ? min(bedHit.distance, 48.0) : 48.0;
         vec2 transmittedUv = bedHit.uv;
@@ -4593,6 +4601,10 @@ vec3 transmitWaterSample(vec2 uv, vec3 position, vec3 opticalNormal, vec4 surfac
         }
         vec3 colourPoint = !approximate && bedHit.distance > 0.0
             ? viewToAbsoluteWorld(position + ray * bedHit.distance) : opaqueWorld;
+        if (!approximate && backgroundLayer.a <= 0.0 && opaqueDepth < 0.999999
+            && texelFetch(colortex6, ivec2(sourceUv * vec2(viewWidth, viewHeight)), 0).a < 2.5) {
+            faceTag = waterBedFaceTag(colourPoint, receiverNormal, waterDistance);
+        }
         vec3 bedColour = waterTransmissionColor(colortex6, depthtex1, transmittedUv,
             colourPoint, receiverNormal, originWorld.y, scattering.rgb, edge);
         vec3 grid = abs(fract(opaqueWorld + 0.5) - 0.5);
@@ -4601,7 +4613,7 @@ vec3 transmitWaterSample(vec2 uv, vec3 position, vec3 opticalNormal, vec4 surfac
             : (axis.x > 0.99 ? min(grid.y, grid.z) : min(grid.x, grid.y));
         float radius = min(0.035, -opaquePosition.z * abs(gbufferProjectionInverse[1][1]) / viewHeight);
         bool boundary = edge || (max(axis.x, max(axis.y, axis.z)) > 0.99 && seam < radius);
-        if (WATER_REFRACTION_STRENGTH > 0.0 && boundary && waterDistance < 24.0) {
+        if (WATER_REFRACTION_STRENGTH > 0.0 && faceTag == 0.0 && boundary && waterDistance < 24.0) {
             bedColour = waterBedCoverage(uv, position, opticalNormal, opaquePosition,
                 mat3(gbufferModelView) * receiverNormal, bedColour, originWorld.y);
         }
@@ -4631,18 +4643,7 @@ vec3 transmitWaterSample(vec2 uv, vec3 position, vec3 opticalNormal, vec4 surfac
     return transmitted;
 }
 
-// 折射改变水底的投影位置；吸收仍由采样处的真实水内距离决定。
-vec3 applyWaterReflection(vec3 color, vec2 uv, float normalVariance) {
-    vec4 surface = readWaterSurface(colortex9, colortex1, uv);
-    if (surface.a <= 0.001 || isEyeInWater != 0) {
-        return color;
-    }
-    vec3 position = waterSurfacePosition(uv, surface.a);
-    vec3 normal = decodeWaterNormal(surface.xy);
-    vec3 incident = normalize(position);
-    vec3 originWorld = viewToAbsoluteWorld(position);
-    vec4 scattering = vec4(readWaterScattering(colortex9, colortex7, uv), 1.0);
-
+vec3 waterInterfaceNormal(vec3 position, vec3 originWorld, float sky) {
     // 透射采用实际位移高度场的斜率；放大的微表面高光法线不代表一整段水柱的几何。
     // 水底变浅与波浪偏折均来自下方同一次 Snell 求解，不额外变换水底深度。
     vec3 opticalNormal = vec3(0.0, 1.0, 0.0);
@@ -4653,10 +4654,25 @@ vec3 applyWaterReflection(vec3 color, vec2 uv, float normalVariance) {
         / (max(viewHeight, 1.0) * max(abs(dot(normalize(position),
             mat3(gbufferModelView) * vec3(0.0, 1.0, 0.0))), 0.1));
     vec2 rainSlope = rainRippleSlope(originWorld.xz, frameTimeCounter, max(footprint, 0.055))
-        * smoothstep(0.95, 0.995, surface.b);
-    opticalNormal = mat3(gbufferModelView)
+        * smoothstep(0.95, 0.995, sky);
+    return mat3(gbufferModelView)
         * normalize(opticalNormal + vec3(-rainSlope.x, 0.0, -rainSlope.y));
-    vec3 transmitted = transmitWaterSample(uv, position, opticalNormal, surface, scattering);
+}
+
+// 折射改变水底的投影位置；吸收仍由采样处的真实水内距离决定。
+vec3 applyWaterReflection(vec3 color, vec2 uv, float normalVariance) {
+    vec4 surface = readWaterSurface(colortex9, colortex1, uv);
+    if (surface.a <= 0.001 || isEyeInWater != 0) {
+        return color;
+    }
+    vec3 position = waterSurfacePosition(uv, surface.a);
+    vec3 normal = decodeWaterNormal(surface.xy);
+    vec3 incident = normalize(position);
+    vec3 originWorld = viewToAbsoluteWorld(position);
+
+    vec3 opticalNormal = waterInterfaceNormal(position, originWorld, surface.b);
+    vec4 bed = texelFetch(colortex7, ivec2(gl_FragCoord.xy), 0);
+    vec3 transmitted = waterResolveBed(uv, position, opticalNormal, bed);
     vec3 reflected = vec3(0.0);
     float roughness = sqrt(sqrt(pow4(WATER_ROUGHNESS) + min(2.0 * normalVariance, 0.035)));
     float coherence = 1.0 / (1.0 + roughness);
@@ -5499,6 +5515,25 @@ vec4 upsampleClouds(vec2 uv, float distance) {
 #endif
 
 
+#ifdef WATER_TRANSMISSION_PASS
+// Save one shaded receiver per water pixel. The composition pass integrates
+// their coverage before applying this pixel's Fresnel, fog and weather.
+void main() {
+    ivec2 pixel = ivec2(gl_FragCoord.xy);
+    vec2 uv = gl_FragCoord.xy / vec2(viewWidth, viewHeight);
+    vec4 surface = readWaterSurface(colortex9, colortex1, uv);
+    if (isEyeInWater != 0 || surface.a <= 0.001) {
+        fullOut0 = vec4(0.0);
+        return;
+    }
+    vec3 position = waterSurfacePosition(uv, surface.a);
+    vec3 normal = waterInterfaceNormal(position, viewToAbsoluteWorld(position), surface.b);
+    vec4 scattering = texelFetch(colortex7, pixel, 0);
+    float tag;
+    vec3 colour = transmitWaterSample(uv, position, normal, surface, scattering, tag);
+    fullOut0 = vec4(colour, tag);
+}
+#else
 void main() {
     vec2 screenCoord = gl_FragCoord.xy / vec2(viewWidth, viewHeight);
     float depth = texture(depthtex0, screenCoord).r;
@@ -5559,4 +5594,4 @@ void main() {
 #endif
     fullOut0 = vec4(color, 1.0);
 }
-
+#endif
