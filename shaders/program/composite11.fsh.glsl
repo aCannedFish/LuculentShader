@@ -4603,14 +4603,22 @@ vec3 applyWaterReflection(vec3 color, vec2 uv, float normalVariance) {
     // 水下窗口需要清晰的波浪起伏；水上倒影使用更平缓的光学斜率，
     // 避免同一组放大法线把相邻倒影拉成相互交叠的碎片。
     vec3 reflectionNormal = opticalNormal;
+#if ENABLE_WATER_WAVES == 1
+    // Short crests also bend the coherent image slightly. Bound their tilt
+    // smoothly (about one degree at default strength) so distant cutouts
+    // keep their outline. Fade this extra tilt toward the horizon.
+    vec3 ripple = normal - opticalNormal;
+    float tiltLimit = 0.012 * WATER_WAVE_STRENGTH
+        * smoothstep(0.0, 0.16, dot(geometricNormal, -incident));
+    reflectionNormal = normalize(opticalNormal + ripple
+        * (tiltLimit / (0.10 + length(ripple))));
+#endif
     vec3 direction = normalize(reflect(incident, reflectionNormal));
     float visibility = reflectionGeometricVisibility(dot(geometricNormal, -incident),
         dot(geometricNormal, direction), roughness);
-    // A pixel resolves short ripples in the Fresnel response before they can
-    // carry a coherent displaced image of a distant tree or cliff.
-    float detail = clamp(0.32 * WATER_WAVE_STRENGTH, 0.0, 0.65);
-    vec3 energyNormal = normalize(mix(reflectionNormal, normal, detail));
-    float weight = waterFresnel(dot(energyNormal, -incident), roughness)
+    // The captured normal already combines the long waves with the ripples
+    // resolved by this pixel. Their tilt varies the local reflected energy.
+    float weight = waterFresnel(dot(normal, -incident), roughness)
         * WATER_REFLECTION_STRENGTH * visibility;
     if (dot(reflectionNormal, -incident) <= 0.0) weight = 0.0;
     if (weight > 0.001) {
@@ -4741,22 +4749,7 @@ vec2 waterWaveOctave(vec2 position, float time, float angle, float wavelength,
 
 
 
-vec3 waterSurfaceNormal(vec2 position, float time, float footprint) {
-    float t = time * WAVE_SPEED;
-    // 四层的传播方向都在主风向 ±60° 内，比完全随机的方向更像风吹出的水面。
-    vec2 slope = waterWaveOctave(position, t, 0.35, 9.0, 2.0, 0.85, 0.24,
-                                 vec2(0.0), footprint);
-    slope += waterWaveOctave(position, t, -0.28, 4.4, 1.8, 0.60, 0.095,
-                             vec2(17.3, -41.9), footprint);
-    // 细波受雨滴扰动更强，雨天会更碎一些，但仍低于旧版的密集波纹。
-    float rain = mix(1.0, 1.45, weatherRainAmount());
-    slope += waterWaveOctave(position, t, 0.98, 2.15, 1.6, 0.42, 0.033 * rain,
-                             vec2(-63.1, 27.7), footprint);
-    slope += waterWaveOctave(position, t, -0.75, 1.1, 1.4, 0.30, 0.0115 * rain,
-                             vec2(91.4, 55.2), footprint);
-    // 上下视角共用可辨认的波峰斜率，折射窗口与倒影随同一水面连续起伏。
-    return normalize(vec3(-slope.x * 2.2, 1.0, -slope.y * 2.2));
-}
+#include "/lib/water_surface_normal.glsl"
 
 #endif
 
