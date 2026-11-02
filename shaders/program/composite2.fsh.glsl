@@ -4,6 +4,9 @@
 /* RENDERTARGETS: 14 */
 layout(location=0) out vec4 tile;
 uniform sampler2D depthtex1;
+uniform sampler2D depthtex2;
+uniform sampler2D colortex7;
+uniform int isEyeInWater;
 uniform mat4 gbufferProjectionInverse;
 
 void main() {
@@ -11,11 +14,19 @@ void main() {
     vec2 bounds = vec2(65504.0, 0.0);
     for (int y = 0; y < 4; ++y) {
         for (int x = 0; x < 4; ++x) {
-            float depth = texelFetch(depthtex1, first + ivec2(x, y), 0).r;
+            ivec2 pixel = first + ivec2(x, y);
+            float depth = isEyeInWater == 1 ? texelFetch(depthtex2, pixel, 0).r
+                                            : texelFetch(depthtex1, pixel, 0).r;
             if (depth < 0.999999) {
                 vec4 point = gbufferProjectionInverse * vec4(0.0, 0.0, depth * 2.0 - 1.0, 1.0);
                 float z = -point.z / point.w;
                 bounds = vec2(min(bounds.x, z), max(bounds.y, z));
+            }
+            if (isEyeInWater == 1) {
+                vec4 layer = texelFetch(colortex7, pixel, 0);
+                if (layer.a > 0.5 && layer.b > 0.0) {
+                    bounds = vec2(min(bounds.x, layer.b), max(bounds.y, layer.b));
+                }
             }
         }
     }

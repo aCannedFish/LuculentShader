@@ -10,10 +10,7 @@ float waterBedFaceTag(vec3 point, vec3 normal, float distance) {
     bool negative = normal[axis] < 0.0;
     int plane = owner[axis] + int(!negative);
     if (abs(point[axis] - float(plane)) > 0.006) return 0.0;
-    int face = waterFindFace(owner, axis, negative, false);
-    if (face < 0 || imageLoad(colorimg5, waterFaceAddress(face, 2)).r != 15u
-        || imageLoad(colorimg5, waterFaceAddress(face, 3)).r != 0u
-        || (imageLoad(colorimg5, waterFaceAddress(face, 8)).r >> 28u) != 0u) return 0.0;
+    if (!waterOpaqueUnitFace(owner, axis, negative)) return 0.0;
     int u = (axis + 1) % 3;
     int v = (axis + 2) % 3;
     int key = ((2 * axis + int(negative)) * 64 + (plane & 63)) * 64

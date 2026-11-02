@@ -8,6 +8,15 @@ bool waterFacesReady() {
 #endif
 }
 
+// A completed single solid rectangle supports clipping to its true block
+// bounds. Partial primitives and translucent or ambiguous layers cannot.
+bool waterOpaqueUnitFace(ivec3 owner, int axis, bool negative) {
+    int face = waterFindFace(owner, axis, negative, false);
+    return face >= 0 && imageLoad(colorimg5, waterFaceAddress(face, 2)).r == 15u
+        && imageLoad(colorimg5, waterFaceAddress(face, 3)).r == 0u
+        && (imageLoad(colorimg5, waterFaceAddress(face, 8)).r >> 28u) == 0u;
+}
+
 struct WaterFaceSample {
     vec3 albedo;
     vec2 lm;

@@ -4061,16 +4061,20 @@ vec3 waterCasterAlbedo(ivec2 pixel, vec3 record, vec3 normal, vec3 hit) {
 
 // If the second view found a surface also seen by the camera, keep its full
 // native material shading. A depth mismatch means an intervening object.
-bool waterCameraSees(vec3 hit, out vec2 uv) {
+bool waterCameraSees(vec3 hit, sampler2D depths, out vec2 uv) {
     if (hit.z >= -near) return false;
     vec4 clip = gbufferProjection * vec4(hit, 1.0);
     uv = clip.xy / clip.w * 0.5 + 0.5;
-    ivec2 size = textureSize(depthtex1, 0);
+    ivec2 size = textureSize(depths, 0);
     ivec2 pixel = ivec2(floor(uv * vec2(size)));
     if (any(lessThan(pixel, ivec2(0))) || any(greaterThanEqual(pixel, size))) return false;
-    float depth = texelFetch(depthtex1, pixel, 0).r;
+    float depth = texelFetch(depths, pixel, 0).r;
     vec3 point = screenToView((vec2(pixel) + 0.5) / vec2(size), depth);
     return depth < 0.999999 && length(point - hit) < max(0.008, -hit.z * 2.0 / viewHeight);
+}
+
+bool waterCameraSees(vec3 hit, out vec2 uv) {
+    return waterCameraSees(hit, depthtex1, uv);
 }
 
 // Shade one verified native texel. Both sides of the viewport boundary
@@ -4190,9 +4194,8 @@ vec3 waterAxisNormal(float tag) {
     return vec3(0.0, 0.0, code == 5 ? 1.0 : -1.0);
 }
 
-vec3 waterBedNormal(vec2 uv, vec3 centre, sampler2D opaqueDepth) {
+vec3 waterNormalFromSample(vec2 uv, vec3 centre, sampler2D opaqueDepth, float tag) {
     vec2 pixel = floor(uv * vec2(viewWidth, viewHeight));
-    float tag = texelFetch(colortex6, ivec2(pixel), 0).a;
     if (fract(tag) >= 0.0625 && fract(tag) < 0.4375) return waterAxisNormal(tag);
     vec3 left = waterBedPoint(pixel - vec2(1.0, 0.0), opaqueDepth);
     vec3 right = waterBedPoint(pixel + vec2(1.0, 0.0), opaqueDepth);
@@ -4204,6 +4207,11 @@ vec3 waterBedNormal(vec2 uv, vec3 centre, sampler2D opaqueDepth) {
     vec3 normal = safeNormalize(cross(dx, dy), fallback);
     normal *= dot(normal, -centre) >= 0.0 ? 1.0 : -1.0;
     return normalize(mat3(gbufferModelViewInverse) * normal);
+}
+
+vec3 waterBedNormal(vec2 uv, vec3 centre, sampler2D opaqueDepth) {
+    ivec2 pixel = ivec2(uv * vec2(viewWidth, viewHeight));
+    return waterNormalFromSample(uv, centre, opaqueDepth, texelFetch(colortex6, pixel, 0).a);
 }
 
 // 先检查每个颜色纹素的几何，再插值；天空黑底、岸上前景与异面颜色不混入水底。
@@ -4247,6 +4255,7 @@ vec3 waterTransmissionColor(sampler2D scene, sampler2D opaqueDepth, vec2 uv,
     return fallback;
 }
 
+uniform sampler2D colortex7;
 #include "/lib/water_ray.glsl"
 #endif
 
@@ -4297,7 +4306,6 @@ vec2 rainRippleSlope(vec2 world, float time, float footprint) {
 
 
 uniform sampler2D colortex9;
-uniform sampler2D colortex7;
 uniform sampler2D depthtex0;
 uniform sampler2D colortex1;
 uniform sampler2D colortex2;
@@ -4475,17 +4483,19 @@ bool waterSharesFaceBlock(vec3 centreWorld, vec3 hitWorld, vec3 axis) {
 
 // A camera plane can extend across a seam if adjacent depth samples confirm it.
 // When there is no support, another view may search beyond the apparent edge.
-bool waterBedHitSupported(WaterRayHit bed, vec3 position, vec3 ray) {
+bool waterCameraHitSupported(WaterRayHit bed, vec3 position, vec3 ray, sampler2D depths, bool preHand) {
     if (bed.distance <= 0.0) return false;
-    vec2 size = vec2(textureSize(depthtex1, 0));
+    vec2 size = vec2(textureSize(depths, 0));
     vec2 uv = waterBedUv(bed.uv);
     ivec2 pixel = ivec2(uv * size);
+    float depth = texelFetch(depths, pixel, 0).r;
+    if (preHand && depth != texelFetch(depthtex1, pixel, 0).r) return true;
     float tag = texelFetch(colortex6, pixel, 0).a;
     if (tag >= 2.5 || fract(tag) < 0.0625 || fract(tag) >= 0.4375) return true;
 
     vec3 axis = waterAxisNormal(tag);
     vec3 normal = mat3(gbufferModelView) * axis;
-    vec3 centre = screenToView(uv, texelFetch(depthtex1, pixel, 0).r);
+    vec3 centre = screenToView(uv, depth);
     vec3 hit = position + ray * bed.distance;
     float tolerance = max(0.003, -hit.z * 0.0002);
     if (abs(dot(hit - centre, normal)) > tolerance) return false;
@@ -4497,7 +4507,8 @@ bool waterBedHitSupported(WaterRayHit bed, vec3 position, vec3 ray) {
     for (int i = 0; i < 4; ++i) {
         ivec2 tap = clamp(base + ivec2(i & 1, i >> 1), ivec2(0), ivec2(size) - 1);
         float other = texelFetch(colortex6, tap, 0).a;
-        float depth = texelFetch(depthtex1, tap, 0).r;
+        float depth = texelFetch(depths, tap, 0).r;
+        if (preHand && depth != texelFetch(depthtex1, tap, 0).r) other = 0.0;
         vec3 point = screenToView((vec2(tap) + 0.5) / size, depth);
         bool same = depth < 0.999999 && other < 2.5
             && int(fract(other) * 16.0) == int(fract(tag) * 16.0)
@@ -4545,7 +4556,7 @@ vec3 transmitWaterSample(vec2 uv, vec3 position, vec3 opticalNormal, vec4 surfac
     bool approximate = false;
     if (WATER_REFRACTION_STRENGTH > 0.0) {
         bedHit = traceWaterGeometry(uv, position, ray, 48.0, depthtex1);
-        bool supported = waterBedHitSupported(bedHit, position, ray);
+        bool supported = waterCameraHitSupported(bedHit, position, ray, depthtex1, false);
         if (!supported || bedHit.hidden) {
             // Include the visible boundary itself: a real face can precede
             // that sample by only a few millimetres at a step or corner.
@@ -4877,47 +4888,6 @@ vec3 sampleWaterShafts(vec2 uv, float pathLength) {
 #endif
 
 
-// OptiFine在手持模型之前复制depthtex2；配对附件只含实际场景，正常手部不变。
-float underwaterExitDepth(vec2 uv) {
-    return texture(depthtex2, uv).r;
-}
-
-vec3 underwaterExitOpaqueColor(vec2 uv) {
-    return texture(colortex15, uv).rgb;
-}
-
-// 判断偏移坐标是否仍在水上景物中，只拒绝水下前景，不锁死水上物体轮廓。
-bool isUnderwaterAirSample(vec2 uv, float waterHeight) {
-    float depth = underwaterExitDepth(uv);
-    if (depth >= 0.999999) {
-        return skyViewDirection(uv).y > 0.01;
-    }
-    vec3 position = screenToView(uv, depth);
-    return viewToAbsoluteWorld(position).y > waterHeight + 0.015;
-}
-
-// 只在水下前景附近渐退偏移，水上物体与天空之间的轮廓可一起随波浪移动。
-vec2 underwaterWaveUv(vec2 uv, vec2 offset, float waterHeight) {
-    vec2 size = vec2(viewWidth, viewHeight);
-    vec2 search = offset;
-    float safe = 0.0;
-    float unsafe = 1.0;
-    for (int index = 0; index < 6; index++) {
-        float scale = index == 0 ? 1.0 : (safe + unsafe) * 0.5;
-        vec2 candidate = clamp(uv + search * scale, vec2(0.001), vec2(0.999));
-        if (isUnderwaterAirSample(candidate, waterHeight)) {
-            safe = scale;
-            if (index == 0) {
-                break;
-            }
-        } else {
-            unsafe = scale;
-        }
-    }
-    float fade = smoothstep(0.0, 1.0, safe);
-    return clamp(uv + offset * fade, 0.5 / size, 1.0 - 0.5 / size);
-}
-
 // 反射源刻意把天空留黑；水下出射必须从天空表恢复背景，并让实际几何继续遮挡它。
 vec3 underwaterBackgroundColor(vec2 uv) {
     if (texture(depthtex1, uv).r < 0.999999) {
@@ -4928,36 +4898,7 @@ vec3 underwaterBackgroundColor(vec2 uv) {
     return cloud.rgb + skyRadiance(direction) * (1.0 - cloud.a);
 }
 
-// 只用于向水上的折射，水内全反射仍使用包含玩家/手持物的原有场景输入。
-vec3 underwaterExitBackgroundColor(vec2 uv) {
-    if (underwaterExitDepth(uv) < 0.999999) {
-        return underwaterExitOpaqueColor(uv);
-    }
-    vec3 direction = skyViewDirection(uv);
-    vec4 cloud = cloudEnvironment(direction);
-    return cloud.rgb + skyRadiance(direction) * (1.0 - cloud.a);
-}
-
-// 每个纹素先恢复自己的背景，再做连续插值，保留岸边轮廓和玻璃独立透明层。
-vec3 sampleWaterExitColor(vec2 uv, out vec4 transparentLayer) {
-    vec2 size = vec2(viewWidth, viewHeight);
-    vec2 pixel = uv * size - 0.5;
-    vec2 base = floor(pixel);
-    vec2 weight = fract(pixel);
-    vec3 sum = vec3(0.0);
-    transparentLayer = vec4(0.0);
-    for (int x = 0; x < 2; x++) {
-        for (int y = 0; y < 2; y++) {
-            vec2 cell = clamp(base + vec2(float(x), float(y)), vec2(0.0), size - 1.0);
-            vec2 sampleUv = (cell + 0.5) / size;
-            float fraction = (x == 0 ? 1.0 - weight.x : weight.x)
-                           * (y == 0 ? 1.0 - weight.y : weight.y);
-            sum += underwaterExitBackgroundColor(sampleUv) * fraction;
-            transparentLayer += texture(colortex2, sampleUv) * fraction;
-        }
-    }
-    return sum;
-}
+#include "/lib/water_exit.glsl"
 
 // 全反射只查询水下场景。离屏或无命中时使用受当地照明控制的水色。
 vec3 underwaterInterfaceReflection(vec3 interfaceView, vec3 direction, float waterHeight) {
@@ -4980,7 +4921,7 @@ vec3 underwaterInterfaceReflection(vec3 interfaceView, vec3 direction, float wat
         vUnderwaterTint, vUnderwaterScatter), hit.coverage);
 }
 
-vec3 applyUnderwaterOptics(vec2 uv, float sceneDepth) {
+vec4 applyUnderwaterOptics(vec2 uv) {
     float eyeDepth = estimateUnderwaterDepth();
     float opaqueDepth = texture(depthtex1, uv).r;
     // 天空只需要方向；避免在无限远投影的 depth=1 处除以零。
@@ -4991,7 +4932,7 @@ vec3 applyUnderwaterOptics(vec2 uv, float sceneDepth) {
     float sceneDistance = opaqueDepth < 0.999999 ? length(opaquePosition) : far;
     vec3 rayWorld = skyViewDirection(uv);
     float waterHeight = cameraPosition.y + eyeDepth;
-    float aboveGeometry = opaqueDepth >= 0.999999 ? 1.0
+    float aboveGeometry = surface.a > 0.001 || opaqueDepth >= 0.999999 ? 1.0
         : smoothstep(waterHeight + 0.015, waterHeight + 0.20, opaqueWorld.y);
     float airCoverage = smoothstep(0.02, 0.20, sceneDistance - path)
                       * smoothstep(0.01, 0.08, rayWorld.y) * aboveGeometry;
@@ -5007,62 +4948,53 @@ vec3 applyUnderwaterOptics(vec2 uv, float sceneDepth) {
         vec3 captured = mat3(gbufferModelViewInverse) * decodeWaterNormal(surface.xy);
         waveNormal = captured * (captured.y < 0.0 ? -1.0 : 1.0);
     }
+    vec3 interfaceView = surface.a > 0.001 ? waterSurfacePosition(uv, surface.a)
+                                          : worldToView(interfaceWorld - cameraPosition);
+#ifdef WATER_TRANSMISSION_PASS
+    // Prepare only the air side here. The hand-free depth and the forward
+    // transparent planes are still available before C7 changes roles.
     float cosine = clamp(dot(rayWorld, waveNormal), 0.0, 1.0);
     float discriminant = 1.0 - WATER_IOR * WATER_IOR * (1.0 - cosine * cosine);
     float edgeWidth = max(fwidth(discriminant) * 1.5, 0.008);
     float window = smoothstep(-edgeWidth, edgeWidth, discriminant);
     float reflectance = waterDielectricFresnel(cosine, WATER_IOR);
+    vec3 air = vec3(0.0);
+    float transmission = 0.0;
+    if (airCoverage > 0.001 && window > 0.001 && discriminant > 0.0) {
+        vec3 airDirection = normalize(refract(rayWorld, -waveNormal, WATER_IOR));
+        vec3 sampleDirection = normalize(mix(rayWorld, airDirection, WATER_REFRACTION_STRENGTH));
+        vec2 radianceUv;
+        bool inside;
+        air = waterExitRadiance(uv, interfaceView, sampleDirection, radianceUv, inside);
+#if DEBUG_VIEW == 0
+        if (rainStrength > 0.001 && inside) {
+            bool waterPresent = texture(colortex9, radianceUv).a > 0.5;
+            air = applyRainOverlay(air, texture(colortex1, radianceUv), waterPresent);
+        }
+#endif
+        transmission = (1.0 - reflectance) * window;
+    }
+    return vec4(air, transmission);
+#else
     vec3 radiance = texture(colortex0, uv).rgb;
     if (texture(colortex9, uv).a > 0.5) {
         radiance = applyTransparentLayer(underwaterBackgroundColor(uv), texture(colortex2, uv));
     }
-    if (airCoverage > 0.001) {
-        vec3 interfaceView = waterSurfacePosition(uv, surface.a > 0.001 ? surface.a : -opaquePosition.z);
-        if (surface.a <= 0.001) {
-            interfaceView = worldToView(interfaceWorld - cameraPosition);
-        }
-        vec3 reflectedDirection = mat3(gbufferModelView) * reflect(rayWorld, waveNormal);
-        vec3 reflection = underwaterInterfaceReflection(interfaceView, reflectedDirection, waterHeight);
-        vec3 air = reflection;
-        if (window > 0.001 && discriminant > 0.0) {
-            vec3 airDirection = normalize(refract(rayWorld, -waveNormal, WATER_IOR));
-            vec3 sampleDirection = normalize(mix(rayWorld, airDirection, WATER_REFRACTION_STRENGTH));
-            float airDistance = opaqueDepth < 0.999999 ? max(sceneDistance - path, 0.5) : 128.0;
-            vec3 target = interfaceView + mat3(gbufferModelView) * sampleDirection * airDistance;
-            vec4 clip = gbufferProjection * vec4(target, 1.0);
-            vec2 projected = clip.xy / max(clip.w, 0.001) * 0.5 + 0.5;
-            bool inside = clip.w > 0.001 && all(greaterThan(projected, vec2(0.001)))
-                && all(lessThan(projected, vec2(0.999)));
-            vec4 cloud = cloudEnvironment(sampleDirection);
-            air = cloud.rgb + skyRadiance(sampleDirection) * (1.0 - cloud.a);
-            vec2 radianceUv = uv;
-            if (inside) {
-                radianceUv = underwaterWaveUv(uv, projected - uv, waterHeight);
-                if (underwaterExitDepth(radianceUv) < 0.999999) {
-                    vec4 transparentLayer;
-                    air = sampleWaterExitColor(radianceUv, transparentLayer);
-                    air = applyTransparentLayer(air, transparentLayer);
-                }
-            }
-#if DEBUG_VIEW == 0
-            if (rainStrength > 0.001 && inside) {
-                bool waterPresent = texture(colortex9, radianceUv).a > 0.5;
-                air = applyRainOverlay(air, texture(colortex1, radianceUv), waterPresent);
-            }
-#endif
-        }
-        vec3 interfaceRadiance = mix(reflection, air, (1.0 - reflectance) * window);
-        radiance = mix(radiance, interfaceRadiance, airCoverage);
-    }
     vec3 normalWorld = waterReceiverNormal(opaqueWorld);
     if (opaqueDepth < 0.999999) {
         float skyVisibility = clamp(float(eyeBrightnessSmooth.y) / 240.0, 0.0, 1.0);
-        radiance *= waterCausticGain(opaqueWorld, normalWorld,
-            cameraPosition.y + eyeDepth, skyVisibility);
+        radiance *= waterCausticGain(opaqueWorld, normalWorld, waterHeight, skyVisibility);
+    }
+    if (airCoverage > 0.001) {
+        vec3 reflectedDirection = mat3(gbufferModelView) * reflect(rayWorld, waveNormal);
+        vec3 reflection = underwaterInterfaceReflection(interfaceView, reflectedDirection, waterHeight);
+        vec4 air = texelFetch(colortex7, ivec2(gl_FragCoord.xy), 0);
+        radiance = mix(radiance, mix(reflection, air.rgb, air.a), airCoverage);
     }
     vec3 result = applyUnderwaterVolume(radiance, path, vUnderwaterTint, vUnderwaterScatter);
     result += sampleWaterShafts(uv, path);
-    return result;
+    return vec4(result, 1.0);
+#endif
 }
 
 #endif
@@ -5522,6 +5454,10 @@ void main() {
     ivec2 pixel = ivec2(gl_FragCoord.xy);
     vec2 uv = gl_FragCoord.xy / vec2(viewWidth, viewHeight);
     vec4 surface = readWaterSurface(colortex9, colortex1, uv);
+    if (isEyeInWater == 1) {
+        fullOut0 = applyUnderwaterOptics(uv);
+        return;
+    }
     if (isEyeInWater != 0 || surface.a <= 0.001) {
         fullOut0 = vec4(0.0);
         return;
@@ -5540,7 +5476,7 @@ void main() {
     // 入水状态是整帧常量。水下合成本身负责天空、深度与水面采样，无需在此
     // 预先计算随后立即被覆盖的天空/水面反射，也不读取空气体积场。
     if (isEyeInWater == 1) {
-        fullOut0 = vec4(applyUnderwaterOptics(screenCoord, depth), 1.0);
+        fullOut0 = applyUnderwaterOptics(screenCoord);
         return;
     }
     vec4 scene = texture(colortex0, screenCoord);

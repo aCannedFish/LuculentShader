@@ -68,7 +68,9 @@ WaterRayHit waterCreaseHit(ivec2 pixel, vec3 point, vec3 normal, int mask,
     return WaterRayHit(uv, nearest <= limit ? nearest : -1.0, false);
 }
 
-WaterRayHit traceWaterGeometry(vec2 uv, vec3 origin, vec3 direction, float range, sampler2D depths) {
+WaterRayHit traceWaterGeometry(vec2 uv, vec3 origin, vec3 direction, float range, sampler2D depths,
+                               bool preHand, out WaterRayHit transparent) {
+    transparent = WaterRayHit(uv, -1.0, false);
     vec2 size = vec2(textureSize(depths, 0));
     if (direction.z > 0.001) range = min(range, (-near * 1.02 - origin.z) / direction.z);
     vec3 end = origin + direction * max(range, 0.0);
@@ -122,20 +124,56 @@ WaterRayHit traceWaterGeometry(vec2 uv, vec3 origin, vec3 direction, float range
         }
         if (!skip) {
             next = min(limit, waterTileExit(start, stepDir, pixel, 1));
+#if DEBUG_VIEW == 0
+            if (preHand && transparent.distance < 0.0) {
+                vec4 layer = texelFetch(colortex7, pixel, 0);
+                if (layer.a > 0.5 && layer.b > 0.0) {
+                    vec2 centre = (vec2(pixel) + 0.5) / size;
+                    vec3 plane = waterSurfacePosition(centre, layer.b);
+                    vec3 normal = layer.x >= 2.0 ? vec3(0.0) : decodeWaterNormal(layer.xy);
+                    float distanceToPlane;
+                    if (layer.x >= 2.0) {
+                        int axis = int(layer.x) - 2;
+                        vec3 basis = vec3(0.0);
+                        basis[axis] = 1.0;
+                        normal = mat3(gbufferModelView) * basis;
+                        distanceToPlane = floor(cameraPosition[axis]) + layer.y - viewToAbsoluteWorld(origin)[axis];
+                    } else {
+                        distanceToPlane = dot(plane - origin, normal);
+                    }
+                    float cosine = dot(normal, direction);
+                    if (abs(cosine) > 0.0001) {
+                        float t = distanceToPlane / cosine;
+                        vec2 projected = waterProjectPixel(origin + direction * t, size);
+                        if (t > 0.001 && t <= range
+                            && all(lessThanEqual(abs(projected - centre * size), vec2(0.501)))) {
+                            transparent = WaterRayHit(centre, t, false);
+                        }
+                    }
+                }
+            }
+#endif
             float depth = texelFetch(depths, pixel, 0).r;
+            // An overlapping fine tile with sky or a distant backdrop at
+            // this texel cannot certify a clear path past its silhouette.
+            if (preHand && depth >= 0.999999) hidden = true;
             if (depth < 0.999999) {
                 vec2 centre = (vec2(pixel) + 0.5) / size;
                 vec3 point = screenToView(centre, depth);
-                vec3 normal = mat3(gbufferModelView) * waterBedNormal(centre, point, depths);
-                float denominator = dot(normal, direction);
                 float flags = texelFetch(colortex6, pixel, 0).a;
-                bool cutout = flags > 2.5;
+                // The pre-hand receiver behind the held item has its own
+                // depth but cannot borrow the item's later face tag.
+                if (preHand && texelFetch(depthtex1, pixel, 0).r != depth) flags = 0.0;
+                vec3 normal = mat3(gbufferModelView) * waterNormalFromSample(centre, point, depths, flags);
+                float denominator = dot(normal, direction);
+                bool cutout = flags > 2.5 || (preHand && flags == 0.0);
                 // A labelled opaque back face exits a solid. A ray starting in
                 // water must have encountered an unseen entrance before it.
                 bool backFace = !cutout && fract(flags) > 0.0 && denominator >= 0.0;
                 float rayZ = 1.0 / (reciprocal + 0.5 * (cursor + next) * slope);
                 hidden = hidden || backFace || rayZ + point.z > max(0.008, rayZ * 0.001);
-                int crease = int(round(fract(flags) * 256.0)) & 15;
+                if (preHand && -point.z - rayZ > max(0.035, rayZ * 0.005)) hidden = true;
+                int crease = preHand ? 0 : int(round(fract(flags) * 256.0)) & 15;
                 if (crease != 0 && !cutout) {
                     WaterRayHit edge = waterCreaseHit(pixel, point, normal, crease, origin, direction, range, depths, size);
                     if (edge.distance > 0.0) {
@@ -160,7 +198,15 @@ WaterRayHit traceWaterGeometry(vec2 uv, vec3 origin, vec3 direction, float range
         }
         cursor = max(next, cursor + 0.001);
     }
-    return WaterRayHit(uv, -1.0, true);
+    // Only a completed, entirely visible interval can prove an open exit
+    // direction. A viewport edge or exhausted visit budget needs another view.
+    bool incomplete = cursor < limit || limit < extent - 0.001;
+    return WaterRayHit(uv, -1.0, !preHand || hidden || incomplete);
+}
+
+WaterRayHit traceWaterGeometry(vec2 uv, vec3 origin, vec3 direction, float range, sampler2D depths) {
+    WaterRayHit unused;
+    return traceWaterGeometry(uv, origin, direction, range, depths, false, unused);
 }
 
 // At a disocclusion or the edge of the viewport only part of the estimated

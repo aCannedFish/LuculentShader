@@ -3582,8 +3582,23 @@ void main() {
     // 线性深度位于 B，alpha 专门用于覆盖标记，避免透明混合破坏水面深度。
     fullOut3 = topSurface
         ? vec4(encodeWaterNormal(normalView), max(-vViewPos.z, 0.0), 1.0) : vec4(0.0);
-    fullOut4 = topSurface ? vec4(scatteringRadiance, 1.0) : vec4(0.0);
+    fullOut4 = topSurface && isEyeInWater != 1 ? vec4(scatteringRadiance, 1.0) : vec4(0.0);
 #if DEBUG_VIEW == 0
+    // Below water the scatter attachment is free. Associate the transmitted
+    // transparent layer with the actual raster plane which wrote its colour.
+    if (isEyeInWater == 1) {
+        if (!water && outputAlpha > 0.001) {
+            vec2 plane = encodeWaterNormal(geometricNormal);
+            vec3 axes = abs(mat3(gbufferModelViewInverse) * geometricNormal);
+            int axis = axes.x > max(axes.y, axes.z) ? 0 : (axes.y > axes.z ? 1 : 2);
+            float coordinate = worldPosition[axis] - floor(cameraPosition[axis]);
+            float gridPlane = round(coordinate * 16.0) / 16.0;
+            if (axes[axis] > 0.99995 && abs(gridPlane - coordinate) < 0.0002 && abs(gridPlane) < 64.0) {
+                plane = vec2(2 + axis, gridPlane);
+            }
+            fullOut4 = vec4(plane, max(-vViewPos.z, 0.0), 1.0);
+        }
+    }
     fullOut1 = topSurface ? vec4(skyVisibility, albedo.a, 0.0, 1.0) : vec4(0.0);
     fullOut2 = water ? vec4(0.0) : vec4(color * outputAlpha, outputAlpha);
 #endif
