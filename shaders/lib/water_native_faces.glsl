@@ -142,13 +142,16 @@ bool waterNearFaceHit(vec3 position, vec3 direction, float limit, out float dist
             if (mask == 0u) span = ivec3(4);
             else if ((mask & (1u << uint(cell.y & 3))) == 0u) span = ivec3(4,1,4);
         }
-        vec3 border = (vec3(cell / span) + step(vec3(0.0), ray)) * vec3(span);
+        ivec3 lower = cell / span * span;
+        vec3 border = vec3(lower) + step(vec3(0.0), ray) * vec3(span);
         vec3 times = mix((border - localOrigin) * reciprocal, vec3(1e8), lessThan(abs(ray),vec3(1e-8)));
         int axis = times.x < min(times.y, times.z) ? 0 : (times.y < times.z ? 1 : 2);
         float t = times[axis];
         if (t > limit) break;
         cursor = max(t, cursor);
-        cell = ivec3(floor(localOrigin + ray * (cursor + 0.00005)));
+        // Only the selected axis leaves this span. A distance epsilon can
+        // jump a second boundary and miss the narrow top of a submerged step.
+        cell = clamp(ivec3(floor(localOrigin + ray * cursor)), lower, lower + span - 1);
         cell[axis] = int(border[axis]) - int(stepDir[axis] < 0);
         if (!waterFarInside(cell)) break;
         if ((imageLoad(colorimg5, waterMacroAddress(waterMacroIndex(cell))).r & (1u << uint(cell.y & 3))) == 0u) continue;
@@ -158,7 +161,7 @@ bool waterNearFaceHit(vec3 position, vec3 direction, float limit, out float dist
         if (t <= 0.0005) continue;
         normal = vec3(0.0);
         normal[axis] = -float(stepDir[axis]);
-        vec2 f = clamp(waterFaceAxes(origin + ray*t - vec3(owner), axis), 0.0, 1.0);
+        vec2 f = clamp(waterFaceAxes(localOrigin + ray*t - vec3(cell), axis), 0.0, 1.0);
         if (waterReadFace(face, f, position + direction*t, material)) {
             distance = t;
             return true;

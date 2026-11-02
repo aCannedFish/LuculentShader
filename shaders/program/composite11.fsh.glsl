@@ -4462,6 +4462,60 @@ vec3 waterViewportColour(vec3 colour, vec2 uv, vec3 hitView, vec3 normalWorld) {
 #endif
 }
 
+// A tagged floor and a neighbouring riser can share a camera pixel. Compare
+// block bounds along the face, allowing independent depth rounding along its normal.
+bool waterSharesFaceBlock(vec3 centreWorld, vec3 hitWorld, vec3 axis) {
+    vec3 separation = abs(floor(hitWorld) - floor(centreWorld));
+    return all(lessThan(separation * (1.0 - abs(axis)), vec3(0.5)));
+}
+
+// A camera plane can extend across a seam if adjacent depth samples confirm it.
+// When there is no support, another view may search beyond the apparent edge.
+bool waterBedHitSupported(WaterRayHit bed, vec3 position, vec3 ray) {
+    if (bed.distance <= 0.0) return false;
+    vec2 size = vec2(textureSize(depthtex1, 0));
+    vec2 uv = waterBedUv(bed.uv);
+    ivec2 pixel = ivec2(uv * size);
+    float tag = texelFetch(colortex6, pixel, 0).a;
+    if (tag >= 2.5 || fract(tag) < 0.0625 || fract(tag) >= 0.4375) return true;
+
+    vec3 axis = waterAxisNormal(tag);
+    vec3 normal = mat3(gbufferModelView) * axis;
+    vec3 centre = screenToView(uv, texelFetch(depthtex1, pixel, 0).r);
+    vec3 hit = position + ray * bed.distance;
+    float tolerance = max(0.003, -hit.z * 0.0002);
+    if (abs(dot(hit - centre, normal)) > tolerance) return false;
+    vec3 hitWorld = viewToAbsoluteWorld(hit);
+    if (waterSharesFaceBlock(viewToAbsoluteWorld(centre), hitWorld, axis)) return true;
+
+    ivec2 base = ivec2(floor(waterProjectPixel(hit, size) - 0.5));
+    bool continuous = true;
+    for (int i = 0; i < 4; ++i) {
+        ivec2 tap = clamp(base + ivec2(i & 1, i >> 1), ivec2(0), ivec2(size) - 1);
+        float other = texelFetch(colortex6, tap, 0).a;
+        float depth = texelFetch(depthtex1, tap, 0).r;
+        vec3 point = screenToView((vec2(tap) + 0.5) / size, depth);
+        bool same = depth < 0.999999 && other < 2.5
+            && int(fract(other) * 16.0) == int(fract(tag) * 16.0)
+            && abs(dot(point - centre, normal)) < tolerance;
+        if (same && waterSharesFaceBlock(viewToAbsoluteWorld(point), hitWorld, axis)) return true;
+        continuous = continuous && same;
+    }
+    return continuous;
+}
+
+// Reuse the camera's native lighting only on the face found by the second view.
+bool waterCameraSeesBed(vec3 hit, vec3 normalWorld, out vec2 uv) {
+    if (!waterCameraSees(hit, uv)) return false;
+    ivec2 pixel = ivec2(uv * vec2(textureSize(depthtex1, 0)));
+    float face = fract(texelFetch(colortex6, pixel, 0).a);
+    if (face < 0.0625 || face >= 0.4375) return true;
+    vec3 axis = waterAxisNormal(face);
+    if (dot(axis, normalWorld) < 0.99) return false;
+    vec3 samplePoint = screenToView(waterBedUv(uv), texelFetch(depthtex1, pixel, 0).r);
+    return waterSharesFaceBlock(viewToAbsoluteWorld(samplePoint), viewToAbsoluteWorld(hit), axis);
+}
+
 // Resolve one covered point of the interface. Extra samples at a crease
 // independently trace and shade their first hits; coordinates never blend.
 vec3 transmitWaterSample(vec2 uv, vec3 position, vec3 opticalNormal, vec4 surface,
@@ -4480,11 +4534,15 @@ vec3 transmitWaterSample(vec2 uv, vec3 position, vec3 opticalNormal, vec4 surfac
     WaterRayHit bedHit = WaterRayHit(uv, length(opaquePosition - position), false);
     vec4 alternateBed = vec4(0.0);
     float alternateDistance = -1.0;
+    vec3 alternateNormal = vec3(0.0);
     bool approximate = false;
     if (WATER_REFRACTION_STRENGTH > 0.0) {
         bedHit = traceWaterGeometry(uv, position, ray, 48.0, depthtex1);
-        if (bedHit.distance < 0.0 || bedHit.hidden) {
-            float extent = bedHit.distance < 0.0 ? 48.0 : bedHit.distance - 0.04;
+        bool supported = waterBedHitSupported(bedHit, position, ray);
+        if (!supported || bedHit.hidden) {
+            // Include the visible boundary itself: a real face can precede
+            // that sample by only a few millimetres at a step or corner.
+            float extent = supported ? bedHit.distance : 48.0;
             vec2 sunPixel;
             bool sunHit = waterSunIntersection(position, ray, extent, alternateDistance, sunPixel);
             float faceDistance;
@@ -4494,9 +4552,10 @@ vec3 transmitWaterSample(vec2 uv, vec3 position, vec3 opticalNormal, vec4 surfac
             bool nativeHit = waterNearFaceHit(position, ray, faceLimit, faceDistance, faceNormal, material);
             if (nativeHit || sunHit) {
                 if (nativeHit) alternateDistance = faceDistance;
+                alternateNormal = nativeHit ? faceNormal : waterCasterNormal(sunPixel);
                 vec3 point = position + ray * alternateDistance;
                 vec2 witness;
-                if (waterCameraSees(point, witness)) {
+                if (waterCameraSeesBed(point, alternateNormal, witness)) {
                     bedHit = WaterRayHit(witness, alternateDistance, false);
                 } else if (nativeHit) {
                     alternateBed = vec4(waterLightFace(material, faceNormal, point), 1.0);
@@ -4512,49 +4571,51 @@ vec3 transmitWaterSample(vec2 uv, vec3 position, vec3 opticalNormal, vec4 surfac
                 mat3(gbufferModelView) * receiverNormal, depthtex1);
         }
     }
-    vec2 transmittedUv = bedHit.uv;
-    vec2 sourceUv = waterBedUv(transmittedUv);
-    opaqueDepth = texture(depthtex1, sourceUv).r;
-    opaquePosition = screenToView(sourceUv, min(opaqueDepth, 0.99999));
-    opaqueWorld = viewToAbsoluteWorld(opaquePosition);
-    receiverNormal = waterBedNormal(sourceUv, opaquePosition, depthtex1);
-    // 水后的玻璃等与水底使用同一折射坐标；岸上的前景层继续由主像素合成。
-    vec4 backgroundLayer = texture(colortex2, sourceUv);
-    vec4 sourceWater = readWaterSurface(colortex9, colortex1, sourceUv);
-    float sourceDepth = -screenToView(sourceUv, texture(depthtex0, sourceUv).r).z;
-    if (transparentLayerInFront(sourceDepth, sourceWater.a, backgroundLayer.a)) {
-        backgroundLayer = vec4(0.0);
+    float waterDistance = alternateDistance;
+    vec3 transmitted = alternateBed.rgb;
+    if (alternateBed.a > 0.0) {
+        opaqueWorld = viewToAbsoluteWorld(position + ray * alternateDistance);
+        receiverNormal = alternateNormal;
+    } else {
+        waterDistance = bedHit.distance >= 0.0 ? min(bedHit.distance, 48.0) : 48.0;
+        vec2 transmittedUv = bedHit.uv;
+        vec2 sourceUv = waterBedUv(transmittedUv);
+        opaqueDepth = texture(depthtex1, sourceUv).r;
+        opaquePosition = screenToView(sourceUv, min(opaqueDepth, 0.99999));
+        opaqueWorld = viewToAbsoluteWorld(opaquePosition);
+        receiverNormal = waterBedNormal(sourceUv, opaquePosition, depthtex1);
+        // 水后的玻璃等与水底使用同一折射坐标；岸上的前景层继续由主像素合成。
+        vec4 backgroundLayer = texture(colortex2, sourceUv);
+        vec4 sourceWater = readWaterSurface(colortex9, colortex1, sourceUv);
+        float sourceDepth = -screenToView(sourceUv, texture(depthtex0, sourceUv).r).z;
+        if (transparentLayerInFront(sourceDepth, sourceWater.a, backgroundLayer.a)) {
+            backgroundLayer = vec4(0.0);
+        }
+        vec3 colourPoint = !approximate && bedHit.distance > 0.0
+            ? viewToAbsoluteWorld(position + ray * bedHit.distance) : opaqueWorld;
+        vec3 bedColour = waterTransmissionColor(colortex6, depthtex1, transmittedUv,
+            colourPoint, receiverNormal, originWorld.y, scattering.rgb, edge);
+        vec3 grid = abs(fract(opaqueWorld + 0.5) - 0.5);
+        vec3 axis = abs(receiverNormal);
+        float seam = axis.y > 0.99 ? min(grid.x, grid.z)
+            : (axis.x > 0.99 ? min(grid.y, grid.z) : min(grid.x, grid.y));
+        float radius = min(0.035, -opaquePosition.z * abs(gbufferProjectionInverse[1][1]) / viewHeight);
+        bool boundary = edge || (max(axis.x, max(axis.y, axis.z)) > 0.99 && seam < radius);
+        if (WATER_REFRACTION_STRENGTH > 0.0 && boundary && waterDistance < 24.0) {
+            bedColour = waterBedCoverage(uv, position, opticalNormal, opaquePosition,
+                mat3(gbufferModelView) * receiverNormal, bedColour, originWorld.y);
+        }
+        if (WATER_REFRACTION_STRENGTH > 0.0 && !approximate && bedHit.distance > 0.0) {
+            bedColour = waterViewportColour(bedColour, transmittedUv, position + ray * bedHit.distance, receiverNormal);
+        }
+        transmitted = applyTransparentLayer(bedColour, backgroundLayer);
+        opaqueWorld = colourPoint;
+        if (opaqueDepth >= 0.999999) receiverNormal = vec3(0.0);
     }
     float verticalDepth = max(originWorld.y - opaqueWorld.y, 0.0);
-    float waterDistance = bedHit.distance >= 0.0 ? bedHit.distance : 48.0;
-    waterDistance = clamp(waterDistance, 0.0, 48.0);
-    vec3 colourPoint = !approximate && bedHit.distance > 0.0
-        ? viewToAbsoluteWorld(position + ray * bedHit.distance) : opaqueWorld;
-    vec3 bedColour = waterTransmissionColor(colortex6, depthtex1, transmittedUv,
-        colourPoint, receiverNormal, originWorld.y, scattering.rgb, edge);
-    vec3 grid = abs(fract(opaqueWorld + 0.5) - 0.5);
-    vec3 axis = abs(receiverNormal);
-    float seam = axis.y > 0.99 ? min(grid.x, grid.z)
-        : (axis.x > 0.99 ? min(grid.y, grid.z) : min(grid.x, grid.y));
-    float radius = min(0.035, -opaquePosition.z * abs(gbufferProjectionInverse[1][1]) / viewHeight);
-    bool boundary = edge || (max(axis.x, max(axis.y, axis.z)) > 0.99 && seam < radius);
-    if (WATER_REFRACTION_STRENGTH > 0.0 && alternateBed.a <= 0.0 && boundary && waterDistance < 24.0) {
-        bedColour = waterBedCoverage(uv, position, opticalNormal, opaquePosition,
-            mat3(gbufferModelView) * receiverNormal, bedColour, originWorld.y);
-    }
-    if (WATER_REFRACTION_STRENGTH > 0.0 && alternateBed.a <= 0.0 && !approximate && bedHit.distance > 0.0) {
-        bedColour = waterViewportColour(bedColour, transmittedUv, position + ray * bedHit.distance, receiverNormal);
-    }
-    vec3 transmitted = applyTransparentLayer(bedColour, backgroundLayer);
-    if (alternateBed.a > 0.0) {
-        waterDistance = alternateDistance;
-        opaqueWorld = viewToAbsoluteWorld(position + ray * alternateDistance);
-        verticalDepth = max(originWorld.y - opaqueWorld.y, 0.0);
-        transmitted = alternateBed.rgb;
-    }
-    if (opaqueDepth < 0.999999 && alternateBed.a <= 0.0) {
-        transmitted *= waterCausticGain(opaqueWorld, receiverNormal, originWorld.y, surface.b);
-    }
+    // Keep the caustic field continuous as the same bed leaves the camera
+    // view. A missing receiver has no illuminated surface to focus light on.
+    transmitted *= waterCausticGain(opaqueWorld, receiverNormal, originWorld.y, surface.b);
 
     // 水上观察时增加随光程累积的散射遮蔽，浅水保留水底，深水以水色为主。
     // 此密度只用于水面合成，避免同时缩短水下相机的可见距离。
