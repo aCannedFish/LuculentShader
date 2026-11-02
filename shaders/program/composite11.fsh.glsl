@@ -3808,78 +3808,6 @@ float waterScatteringPhase(float cosine) {
 
 // 水面以上的遮挡沿折射方向回溯到入水点；水内遮挡继续使用原生深度。
 // 避免用空气中的太阳方向在水下平移树影，使光束与折射后的太阳中心错位。
-float waterRefractedSunVisibility(vec3 position, float waterHeight, vec3 direction) {
-    float depth = max(waterHeight - position.y, 0.0);
-    vec3 entry = position - direction * (depth / max(-direction.y, 0.2));
-    float incident = waterSunVisibility(entry, 0.025);
-    if (incident <= 0.0) return 0.0;
-    vec4 projected = shadowProjection * shadowModelView * vec4(position - cameraPosition, 1.0);
-    vec3 coordinate = distortShadow(projected.xyz / max(projected.w, EPSILON)) * 0.5 + 0.5;
-    if (any(lessThan(coordinate, vec3(0.0))) || any(greaterThan(coordinate, vec3(1.0)))) {
-        return incident;
-    }
-    vec2 pixel = shadowTexelCenter(coordinate.xy);
-    float depthSample = texture(shadowtex1, pixel).r;
-    if (depthSample >= 0.999999) return incident;
-    vec4 caster = shadowProjectionInverse
-        * vec4(undistortShadow(pixel * 2.0 - 1.0), depthSample * 2.0 - 1.0, 1.0);
-    vec3 world = (shadowModelViewInverse * (caster / max(caster.w, EPSILON))).xyz + cameraPosition;
-    float submerged = 1.0 - smoothstep(waterHeight - 0.06, waterHeight + 0.06, world.y);
-    return incident * mix(1.0, waterSunVisibility(position, 0.025), submerged);
-}
-
-// 对分段内的Beer衰减解析积分，低采样数也不会额外改变散射能量。
-vec3 waterScatteringSegment(vec3 extinction, float opticalStart, float opticalEnd, float segmentLength) {
-    vec3 start = exp(-extinction * opticalStart);
-    vec3 end = exp(-extinction * opticalEnd);
-    vec3 change = extinction * (opticalEnd - opticalStart);
-    vec3 integral;
-    for (int channel = 0; channel < 3; channel++) {
-        float delta = change[channel];
-        integral[channel] = abs(delta) < 0.001
-            ? start[channel] * (1.0 - delta * 0.5 + delta * delta / 6.0)
-            : (start[channel] - end[channel]) / delta;
-    }
-    return integral * segmentLength;
-}
-
-// 固定步数积分真实阴影和光程。透视使平行的日照阴影在画面中朝太阳聚拢，
-// 随视角自然展开；不使用固定的世界噪声条带或屏幕放射纹理。
-vec3 integrateWaterShafts(vec2 uv, float pathLength, float eyeDepth, float surfaceSky) {
-    float skyLevel = clamp(surfaceSky, 0.0, 1.0);
-    vec3 sunlight = getSunLightColor();
-    if (UNDERWATER_SHAFT_STRENGTH <= 0.0 || skyLevel <= 0.03 || luma(sunlight) <= 0.001) {
-        return vec3(0.0);
-    }
-    vec3 ray = normalize(mat3(gbufferModelViewInverse) * screenToView(uv, 0.5));
-    vec3 direction = waterSunDirection();
-    float stepLength = min(pathLength, 48.0) / float(WATER_SHAFT_STEPS);
-    // 无时间降噪时采用固定中点，避免随机积分位置形成显眼的像素颗粒。
-    const float jitter = 0.5;
-    float waterHeight = cameraPosition.y + eyeDepth;
-    vec3 extinction = underwaterExtinctionCoefficient();
-    vec3 sum = vec3(0.0);
-    for (int index = 0; index < WATER_SHAFT_STEPS; index++) {
-        float distance = (float(index) + jitter) * stepLength;
-        vec3 position = cameraPosition + ray * distance;
-        float visibility = waterRefractedSunVisibility(position, waterHeight, direction);
-        // 入射光和射向相机的光程一起衰减，使光柱自然融入同一水色。
-        float start = float(index) * stepLength;
-        float end = start + stepLength;
-        float sunPathStart = max(eyeDepth - ray.y * start, 0.0)
-            / max(-direction.y, 0.2) * UNDERWATER_DEPTH_DIMMING;
-        float sunPathEnd = max(eyeDepth - ray.y * end, 0.0)
-            / max(-direction.y, 0.2) * UNDERWATER_DEPTH_DIMMING;
-        sum += waterScatteringSegment(extinction, start + sunPathStart, end + sunPathEnd,
-            stepLength) * visibility;
-    }
-    float forwardPhase = waterScatteringPhase(dot(ray, -direction));
-    // 水内散射偏向青蓝，避免白色入射光叠在蓝雾上形成灰黄条带。
-    // 强度与相函数分别控制，不改变真实遮挡或制造额外光束边界。
-    vec3 scattering = (0.015 + WATER_TURBIDITY * 0.5) * vec3(0.22, 0.85, 1.25);
-    return sum * sunlight * scattering * forwardPhase * 9.0 * UNDERWATER_SHAFT_STRENGTH
-         * smoothstep(0.03, 0.5, skyLevel) * (1.0 - rainStrength * 0.8);
-}
 
 #endif
 
@@ -4428,26 +4356,24 @@ vec4 queryWaterRadiance(vec3 position, vec3 direction, float roughness, float sk
         bool sunHit = REFLECTION_OCCLUSION_STEPS > 0
             && waterSunIntersection(position, direction, maximum, sunDistance, sunPixel);
         float faceDistance;
-        vec4 nativeFace = waterNearFaceHit(position, direction,
-            min(sunHit ? sunDistance + 0.015 : maximum, 96.0), faceDistance);
-        if (nativeFace.a > 0.0) {
+        vec3 faceNormal;
+        WaterFaceSample material;
+        bool nativeHit = waterNearFaceHit(position, direction,
+            min(sunHit ? sunDistance + 0.015 : maximum, 96.0), faceDistance, faceNormal, material);
+        if (nativeHit || sunHit) {
+            float distance = nativeHit ? faceDistance : sunDistance;
+            vec3 point = position + direction * distance;
             vec2 witness;
-            if (waterCameraSees(position + direction * faceDistance, witness)) {
-                vec4 colour = filteredWaterReflection(witness, faceDistance,
-                    reflectionSceneDepth(depthtex1, witness), roughness);
-                if (colour.a > 0.0) nativeFace.rgb = colour.rgb;
+            vec3 radiance;
+            if (waterCameraSees(point, witness)) {
+                radiance = filteredWaterReflection(witness, distance,
+                    reflectionSceneDepth(depthtex1, witness), roughness).rgb;
+            } else if (nativeHit) {
+                radiance = waterLightFace(material, faceNormal, point);
+            } else {
+                radiance = waterCasterRadiance(sunPixel, point).rgb;
             }
-            return vec4(reflectionAirMedium(nativeFace.rgb, faceDistance, direction), 1.0);
-        }
-        if (sunHit) {
-            vec2 witness;
-            vec3 sunColour = waterCasterRadiance(sunPixel, position + direction * sunDistance).rgb;
-            if (waterCameraSees(position + direction * sunDistance, witness)) {
-                vec4 colour = filteredWaterReflection(witness, sunDistance,
-                    reflectionSceneDepth(depthtex1, witness), roughness);
-                if (colour.a > 0.0) sunColour = colour.rgb;
-            }
-            return vec4(reflectionAirMedium(sunColour, sunDistance, direction), 1.0);
+            return vec4(reflectionAirMedium(radiance, distance, direction), 1.0);
         }
     }
     if (visible) {
@@ -4563,17 +4489,20 @@ vec3 transmitWaterSample(vec2 uv, vec3 position, vec3 opticalNormal, vec4 surfac
             bool sunHit = waterSunIntersection(position, ray, extent, alternateDistance, sunPixel);
             float faceDistance;
             float faceLimit = sunHit ? alternateDistance + 0.015 : extent;
-            vec4 faceColour = waterNearFaceHit(position, ray, faceLimit, faceDistance);
-            if (faceColour.a > 0.0) {
-                alternateBed = faceColour;
-                alternateDistance = faceDistance;
-            } else if (sunHit) {
-                alternateBed = waterCasterRadiance(sunPixel, position + ray * alternateDistance);
-            }
-            vec2 witness;
-            if (alternateBed.a > 0.0 && waterCameraSees(position + ray * alternateDistance, witness)) {
-                bedHit = WaterRayHit(witness, alternateDistance, false);
-                alternateBed.a = 0.0;
+            vec3 faceNormal;
+            WaterFaceSample material;
+            bool nativeHit = waterNearFaceHit(position, ray, faceLimit, faceDistance, faceNormal, material);
+            if (nativeHit || sunHit) {
+                if (nativeHit) alternateDistance = faceDistance;
+                vec3 point = position + ray * alternateDistance;
+                vec2 witness;
+                if (waterCameraSees(point, witness)) {
+                    bedHit = WaterRayHit(witness, alternateDistance, false);
+                } else if (nativeHit) {
+                    alternateBed = vec4(waterLightFace(material, faceNormal, point), 1.0);
+                } else {
+                    alternateBed = waterCasterRadiance(sunPixel, point);
+                }
             }
         }
         if (alternateBed.a <= 0.0 && bedHit.distance < 0.0 && opaqueDepth < 0.999999) {

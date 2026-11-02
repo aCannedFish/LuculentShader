@@ -83,24 +83,36 @@ WaterRayHit traceWaterGeometry(vec2 uv, vec3 origin, vec3 direction, float range
     vec2 edgeT = (edge - start) / (stepDir + mix(vec2(-1e-8), vec2(1e-8), step(vec2(0.0), stepDir)));
     float limit = min(extent, min(edgeT.x, edgeT.y));
     float cursor = 0.0;
+    float largeExit = limit >= 64.0 ? 0.0 : limit;
+    float middleExit = 0.0;
     bool hidden = false;
     for (int visit = 0; visit < 112 && cursor < limit; ++visit) {
         vec2 samplePixel = start + stepDir * min(cursor + 0.001, (cursor + limit) * 0.5);
         ivec2 pixel = clamp(ivec2(floor(samplePixel)), ivec2(0), ivec2(size) - 1);
         float next = cursor;
         bool skip = false;
-        for (int level = 0; level < 2; ++level) {
-            int side = level == 0 ? 16 : 4;
+        for (int level = 0; level < 3; ++level) {
+            // An already overlapping tile needs no more fetches while the ray
+            // is searching its children. Degenerate short rays start at 16.
+            if ((level == 0 && cursor < largeExit) || (level == 1 && cursor < middleExit)) continue;
+            int side = level == 0 ? 64 : (level == 1 ? 16 : 4);
             next = min(limit, waterTileExit(start, stepDir, pixel, side));
             ivec2 tile = pixel / side;
             // Fractional viewports may omit a final partial 4x4 tile.
             if (any(greaterThanEqual(tile, ivec2(size) / 4))) continue;
+            if (level == 0) {
+                tile.x += (int(size.x) + 15) / 16;
+                largeExit = next;
+                if (tile.x >= int(size.x)/4) continue;
+            } else if (level == 1) {
+                middleExit = next;
+            }
             vec4 data = texelFetch(colortex14, tile, 0);
-            vec2 bounds = level == 0 ? data.zw : data.xy;
+            vec2 bounds = level < 2 ? data.zw : data.xy;
             float z0 = 1.0 / (reciprocal + cursor * slope);
             float z1 = 1.0 / (reciprocal + next * slope);
             // Include half-float rounding and subpixel extent on steep faces.
-            float margin = 0.015 + 0.002 * max(z0, z1) + (bounds.y - bounds.x) / float(side);
+            float margin = 0.015 + 0.002 * max(z0, z1) + (bounds.y - bounds.x) / float(min(side,16));
             skip = bounds.x > bounds.y || max(z0, z1) < bounds.x - margin
                 || min(z0, z1) > bounds.y + margin;
             if (skip) {

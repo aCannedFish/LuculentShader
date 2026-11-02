@@ -2704,10 +2704,7 @@ float waterScatteringPhase(float cosine) {
 
 // 水面以上的遮挡沿折射方向回溯到入水点；水内遮挡继续使用原生深度。
 // 避免用空气中的太阳方向在水下平移树影，使光束与折射后的太阳中心错位。
-float waterRefractedSunVisibility(vec3 position, float waterHeight, vec3 direction) {
-    float depth = max(waterHeight - position.y, 0.0);
-    vec3 entry = position - direction * (depth / max(-direction.y, 0.2));
-    float incident = waterSunVisibility(entry, 0.025);
+float waterSubmergedVisibility(vec3 position, float waterHeight, float incident) {
     if (incident <= 0.0) return 0.0;
     vec4 projected = shadowProjection * shadowModelView * vec4(position - cameraPosition, 1.0);
     vec3 coordinate = distortShadow(projected.xyz / max(projected.w, EPSILON)) * 0.5 + 0.5;
@@ -2722,6 +2719,54 @@ float waterRefractedSunVisibility(vec3 position, float waterHeight, vec3 directi
     vec3 world = (shadowModelViewInverse * (caster / max(caster.w, EPSILON))).xyz + cameraPosition;
     float submerged = 1.0 - smoothstep(waterHeight - 0.06, waterHeight + 0.06, world.y);
     return incident * mix(1.0, waterSunVisibility(position, 0.025), submerged);
+}
+
+#include "/lib/water_entry_grid.glsl"
+vec2 volumeSize();
+uniform sampler2D colortex4;
+
+// Trace back from this scattering point to its own entry on the moving
+// interface. Interpolate the sun disk visibility there, retaining occluders
+// inside the water. Outside the patch, use the native directional shadow.
+float waterSegmentSun(vec3 point, float height, vec3 flatRay, out vec3 incoming, out float entryHeight) {
+    vec2 size = volumeSize();
+    float spacing = entryGridSpacing(size);
+    vec2 start = entryGridOrigin(size, spacing);
+    incoming = flatRay;
+    entryHeight = height;
+    vec2 entry = point.xz - incoming.xz * max(height-point.y, 0.0) / max(-incoming.y, 0.2);
+    vec2 pixel = entry / spacing - start;
+    vec2 margin = min(pixel, size - pixel);
+    float firstMargin = min(margin.x, margin.y);
+    if (firstMargin > 1.5) {
+        vec4 surface = textureLod(colortex4, pixel / vec2(viewWidth,viewHeight), 0.0);
+        vec2 d = surface.xy;
+        incoming = vec3(d.x, -sqrt(max(1.0-dot(d,d), 0.04)), d.y);
+        entryHeight = cameraPosition.y + surface.a;
+        entry = point.xz - incoming.xz * max(entryHeight-point.y,0.0) / max(-incoming.y,0.2);
+        pixel = entry / spacing - start;
+        margin = min(pixel, size - pixel);
+        if (min(margin.x,margin.y) > 1.5) {
+            surface = textureLod(colortex4, pixel / vec2(viewWidth,viewHeight), 0.0);
+            d = surface.xy;
+            incoming = vec3(d.x, -sqrt(max(1.0-dot(d,d),0.04)), d.y);
+            entryHeight = cameraPosition.y + surface.a;
+            float confidence = smoothstep(1.5, 5.0, min(firstMargin, min(margin.x,margin.y)))
+                * (1.0 - smoothstep(0.12, 0.50, abs(entryHeight-height)));
+            float visibility = surface.b;
+            if (confidence < 1.0) {
+                vec3 edgeEntry = point - flatRay * (max(height-point.y,0.0) / max(-flatRay.y,0.2));
+                visibility = mix(waterSunVisibility(edgeEntry, 0.025), visibility, confidence);
+                incoming = normalize(mix(flatRay, incoming, confidence));
+                entryHeight = mix(height, entryHeight, confidence);
+            }
+            return waterSubmergedVisibility(point, entryHeight, visibility);
+        }
+    }
+    entryHeight = height;
+    incoming = flatRay;
+    vec3 fallback = point - flatRay * (max(height - point.y, 0.0) / max(-flatRay.y, 0.2));
+    return waterSubmergedVisibility(point, height, waterSunVisibility(fallback, 0.025));
 }
 
 // 对分段内的Beer衰减解析积分，低采样数也不会额外改变散射能量。
@@ -2758,22 +2803,24 @@ vec3 integrateWaterShafts(vec2 uv, float pathLength, float eyeDepth, float surfa
     for (int index = 0; index < WATER_SHAFT_STEPS; index++) {
         float distance = (float(index) + jitter) * stepLength;
         vec3 position = cameraPosition + ray * distance;
-        float visibility = waterRefractedSunVisibility(position, waterHeight, direction);
+        vec3 incoming;
+        float entryHeight;
+        float visibility = waterSegmentSun(position, waterHeight, direction, incoming, entryHeight);
+        float depthBelowEntry = entryHeight - cameraPosition.y;
         // 入射光和射向相机的光程一起衰减，使光柱自然融入同一水色。
         float start = float(index) * stepLength;
         float end = start + stepLength;
-        float sunPathStart = max(eyeDepth - ray.y * start, 0.0)
-            / max(-direction.y, 0.2) * UNDERWATER_DEPTH_DIMMING;
-        float sunPathEnd = max(eyeDepth - ray.y * end, 0.0)
-            / max(-direction.y, 0.2) * UNDERWATER_DEPTH_DIMMING;
+        float sunPathStart = max(depthBelowEntry - ray.y * start, 0.0)
+            / max(-incoming.y, 0.2) * UNDERWATER_DEPTH_DIMMING;
+        float sunPathEnd = max(depthBelowEntry - ray.y * end, 0.0)
+            / max(-incoming.y, 0.2) * UNDERWATER_DEPTH_DIMMING;
         sum += waterScatteringSegment(extinction, start + sunPathStart, end + sunPathEnd,
-            stepLength) * visibility;
+            stepLength) * visibility * waterScatteringPhase(dot(ray, -incoming));
     }
-    float forwardPhase = waterScatteringPhase(dot(ray, -direction));
     // 水内散射偏向青蓝，避免白色入射光叠在蓝雾上形成灰黄条带。
     // 强度与相函数分别控制，不改变真实遮挡或制造额外光束边界。
     vec3 scattering = (0.015 + WATER_TURBIDITY * 0.5) * vec3(0.22, 0.85, 1.25);
-    return sum * sunlight * scattering * forwardPhase * 9.0 * UNDERWATER_SHAFT_STRENGTH
+    return sum * sunlight * scattering * 9.0 * UNDERWATER_SHAFT_STRENGTH
          * smoothstep(0.03, 0.5, skyLevel) * (1.0 - rainStrength * 0.8);
 }
 
@@ -3201,7 +3248,7 @@ vec4 integrateLocalAtmosphere(vec2 uv, float sceneDistance) {
 }
 #endif
 
-uniform sampler2D colortex4;
+
 uniform sampler2D colortex9;
 uniform sampler2D colortex1;
 uniform sampler2D depthtex1;

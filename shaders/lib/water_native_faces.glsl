@@ -8,12 +8,17 @@ bool waterFacesReady() {
 #endif
 }
 
+struct WaterFaceSample {
+    vec3 albedo;
+    vec2 lm;
+    float ao;
+    uint priority;
+};
+
 // Resolve the four real vertex attributes at the physical hit, preserving the
 // sprite rotation and the owning face on either side of a material boundary.
-vec4 waterNativeLayerColour(int face, int layer, int axis, ivec3 owner, vec3 normal,
-                            vec3 hitView, vec3 hitWorld, out uint priority) {
-    priority = 0u;
-    vec2 f = clamp(waterFaceAxes(hitWorld - vec3(owner), axis), 0.0, 1.0);
+bool waterReadLayer(int face, int layer, vec2 f, vec3 hitView, out WaterFaceSample sampleData) {
+    uint priority = 0u;
     vec2 uv = vec2(0.0);
     vec2 low = vec2(1.0), high = vec2(0.0);
     vec3 tint = vec3(0.0);
@@ -38,8 +43,14 @@ vec4 waterNativeLayerColour(int face, int layer, int axis, ivec3 owner, vec3 nor
     float footprint = 2.0 * abs(hitView.z * gbufferProjectionInverse[1][1]) / viewHeight;
     vec4 texel = textureLod(colortex5, clamp(uv, low + inset, high - inset),
         max(log2(max(rate * footprint, 1.0)), 0.0));
-    if (priority != 0u && texel.a < 0.1) return vec4(0.0);
-    vec3 albedo = toLinearSpace(texel.rgb * tint);
+    if (priority != 0u && texel.a < 0.1) return false;
+    sampleData = WaterFaceSample(toLinearSpace(texel.rgb * tint), (lm + 0.5) / 16.0, ao, priority);
+    return true;
+}
+
+// Illuminate the selected material only when the camera cannot supply its
+// radiance. Visibility traversal and overlay selection do not require GI.
+vec3 waterLightFace(WaterFaceSample material, vec3 normal, vec3 hitView) {
     vec3 coord = waterShadowCoordinate(viewToWorld(hitView) + normal * 0.015);
     vec3 transfer = vec3(1.0);
     if (all(greaterThan(coord, vec3(0.0))) && all(lessThan(coord, vec3(1.0)))) {
@@ -53,28 +64,26 @@ vec4 waterNativeLayerColour(int face, int layer, int axis, ivec3 owner, vec3 nor
         }
     }
     samplingWaterCaster = true;
-    vec3 radiance = computeSurfaceLighting(albedo, mat3(gbufferModelView) * normal,
-        (lm + 0.5) / 16.0, transfer, ao, hitView);
+    vec3 radiance = computeSurfaceLighting(material.albedo, mat3(gbufferModelView) * normal,
+        material.lm, transfer, material.ao, hitView);
     samplingWaterCaster = false;
-    return vec4(radiance, 1.0);
+    return radiance;
 }
 
 // A slot is coverage, not occupancy. Respect alpha and decline ambiguous
 // overlapping materials rather than painting an unobserved face on a block.
-vec4 waterNativeFaceColour(int face, int axis, ivec3 owner, vec3 normal,
-                           vec3 hitView, vec3 hitWorld) {
+bool waterReadFace(int face, vec2 f, vec3 hitView, out WaterFaceSample material) {
     uint a = imageLoad(colorimg5, waterFaceAddress(face, 2)).r;
     uint b = imageLoad(colorimg5, waterFaceAddress(face, 3)).r;
-    if (a != 15u || (b != 0u && b != 15u)) return vec4(0.0);
-    uint firstPriority;
-    vec4 first = waterNativeLayerColour(face, 0, axis, owner, normal, hitView, hitWorld, firstPriority);
+    if (a != 15u || (b != 0u && b != 15u)) return false;
+    bool first = waterReadLayer(face, 0, f, hitView, material);
     if (b == 0u) return first;
-    uint nextPriority;
-    vec4 second = waterNativeLayerColour(face, 1, axis, owner, normal, hitView, hitWorld, nextPriority);
-    if (first.a <= 0.0) return second;
-    if (second.a <= 0.0) return first;
-    if (firstPriority == nextPriority) return vec4(0.0);
-    return firstPriority > nextPriority ? first : second;
+    WaterFaceSample overlay;
+    bool second = waterReadLayer(face, 1, f, hitView, overlay);
+    if (!second) return first;
+    if (first && overlay.priority == material.priority) return false;
+    if (!first || overlay.priority > material.priority) material = overlay;
+    return true;
 }
 
 // Lookup at a known face uses the physical owner, never the block beneath a
@@ -92,14 +101,18 @@ vec4 waterOwnedColour(vec3 hitView, vec3 surfaceNormal) {
     if (abs(world[axis] - plane) > 0.012) return vec4(0.0);
     int face = waterFindFace(owner, axis, normal[axis] < 0.0, false);
     if (face < 0) return vec4(0.0);
-    return waterNativeFaceColour(face, axis, owner, normal, hitView, world);
+    WaterFaceSample material;
+    vec2 f = clamp(waterFaceAxes(world-vec3(owner), axis), 0.0, 1.0);
+    if (!waterReadFace(face, f, hitView, material)) return vec4(0.0);
+    return vec4(waterLightFace(material, normal, hitView), 1.0);
 }
 
 // Consult only certified faces actually submitted this frame. Cell traversal
 // locates their boundary planes; it never interprets occupancy as a surface.
-vec4 waterNearFaceHit(vec3 position, vec3 direction, float limit, out float distance) {
+bool waterNearFaceHit(vec3 position, vec3 direction, float limit, out float distance,
+                      out vec3 normal, out WaterFaceSample material) {
     distance = -1.0;
-    if (!waterFacesReady() || limit <= 0.0) return vec4(0.0);
+    if (!waterFacesReady() || limit <= 0.0) return false;
     vec3 origin = viewToAbsoluteWorld(position);
     vec3 ray = mat3(gbufferModelViewInverse) * direction;
     ivec3 grid = waterFarOrigin();
@@ -143,13 +156,13 @@ vec4 waterNearFaceHit(vec3 position, vec3 direction, float limit, out float dist
         int face = waterFindFace(owner, axis, stepDir[axis] > 0, false);
         if (face < 0) continue;
         if (t <= 0.0005) continue;
-        vec3 normal = vec3(0.0);
+        normal = vec3(0.0);
         normal[axis] = -float(stepDir[axis]);
-        vec4 colour = waterNativeFaceColour(face, axis, owner, normal, position + direction*t, origin + ray*t);
-        if (colour.a > 0.0) {
+        vec2 f = clamp(waterFaceAxes(origin + ray*t - vec3(owner), axis), 0.0, 1.0);
+        if (waterReadFace(face, f, position + direction*t, material)) {
             distance = t;
-            return colour;
+            return true;
         }
     }
-    return vec4(0.0);
+    return false;
 }

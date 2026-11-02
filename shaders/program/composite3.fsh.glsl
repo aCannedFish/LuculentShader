@@ -21,5 +21,20 @@ void main() {
             }
         }
     }
+    // Store the long-ray level beside the 16x16 level, in otherwise unused ZW.
+    ivec2 large = cell - ivec2((size.x + 15) / 16, 0);
+    if (all(greaterThanEqual(large, ivec2(0))) && all(lessThan(large, (size + 63) / 64))) {
+        coarse = vec2(65504.0, 0.0);
+        if (any(greaterThan((large + 1) * 64, size))) {
+            coarse = vec2(0.0, 65504.0);
+        } else {
+            for (int y = 0; y < 16; ++y) {
+                for (int x = 0; x < 16; ++x) {
+                    vec2 child = texelFetch(colortex14, large * 16 + ivec2(x,y), 0).xy;
+                    coarse = vec2(min(coarse.x, child.x), max(coarse.y, child.y));
+                }
+            }
+        }
+    }
     tile = vec4(texelFetch(colortex14, cell, 0).xy, coarse);
 }
