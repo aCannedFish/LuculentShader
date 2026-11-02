@@ -14,7 +14,7 @@ layout(location=4) out vec4 fullOut4;
  * OptiFine 会在 fullOut0 写入处注入 `if (a < alphaTestRef) discard;`，
  * 写 a=0 会连深度一起丢掉，不透明体便不再投影；所有标记的 alpha 都必须高于该阈值。
  */
-/* DRAWBUFFERS:0 */
+/* DRAWBUFFERS:01 */
 
 /* 全局渲染设置。集中定义加载器常量、缓冲格式和可调宏；各程序共享同一组默认值。
  * 游戏内选项由 shaders.properties 分组，用户选择由加载器保存。
@@ -460,6 +460,8 @@ uniform sampler2D gtexture;
 SIMPLE_VARYING vec2 vTexCoord;
 SIMPLE_VARYING vec4 vColor;
 SIMPLE_VARYING vec3 vShadowPosition;
+SIMPLE_VARYING vec3 vCasterNormal;
+SIMPLE_VARYING vec2 vCasterLight;
 SIMPLE_VARYING float vCaster;
 
 void main() {
@@ -500,5 +502,15 @@ void main() {
         caster = vec4(albedo.rgb, 0.75);
     }
     fullOut0 = caster;
+    vec2 oct = round(encodeNormal(normalize(vCasterNormal)) * 255.0);
+    vec2 levels = round(vCasterLight * 15.0);
+    // Use texture-space phase from the actually bound sprite. This also works
+    // when OptiFine submits individual textures rather than the block atlas.
+    vec2 phase = floor(fract(vTexCoord * vec2(textureSize(gtexture, 0)) / 16.0) * 256.0);
+    vec3 rgb = round(clamp(albedo.rgb, 0.0, 1.0) * 255.0);
+    vec3 record = vec3(rgb.xy + oct * 256.0 + phase * 65536.0,
+        rgb.z + (levels.x + levels.y * 16.0) * 256.0 + (vCaster > 3.5 ? 65536.0 : 0.0));
+    float opaque = vCaster > 1.5 && vCaster < 3.5 ? 0.0 : 1.0;
+    fullOut1 = vec4(record * opaque, opaque);
 }
 

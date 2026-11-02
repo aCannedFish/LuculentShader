@@ -1704,6 +1704,9 @@ in vec3 at_midBlock;
 SIMPLE_VARYING vec2 vTexCoord;
 SIMPLE_VARYING vec4 vColor;
 SIMPLE_VARYING vec3 vShadowPosition;
+// Surface orientation and light levels belong to the same native alpha-tested texel.
+SIMPLE_VARYING vec3 vCasterNormal;
+SIMPLE_VARYING vec2 vCasterLight;
 // 投影体类别：0 不透明，1 发光方块，2 透光玻璃，3 水，4 薄植被。
 SIMPLE_VARYING float vCaster;
 
@@ -1753,6 +1756,8 @@ void main() {
 
     // 4. 透传贴图坐标与顶点颜色，供片元着色器做 alpha 测试
     vTexCoord = vaUV0;
+    vCasterNormal = mat3(shadowModelViewInverse) * normalMatrix * vaNormal;
+    vCasterLight = clamp(vec2(vaUV2) / 240.0, 0.0, 1.0);
     vColor = vaColor;
     if (vColor.a < 0.1) {
         vColor.a = 1.0;

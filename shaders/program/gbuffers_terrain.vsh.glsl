@@ -778,7 +778,26 @@ vec3 foliageWindNormal(vec3 worldPosition, vec3 root, float material, vec3 norma
 in vec3 at_midBlock;
 
 
+// Save the native sky-light column while the game's lightmap is bound.
+// The final C5 row is outside both voxel volumes. Only one vertex per frame
+// copies the 16 entries, shared by every secondary water hit.
+uniform sampler2D lightmap;
+layout(r32ui, binding=5) uniform uimage2D colorimg5;
+void captureWaterLightmap() {
+    if ((gl_VertexID & 255) != 0) return;
+    int row = imageSize(colorimg5).y - 1;
+    ivec2 lockPixel = ivec2(16, row);
+    uint stamp = uint(frameCounter) + 1u;
+    if (imageLoad(colorimg5, lockPixel).r == stamp) return;
+    if (imageAtomicExchange(colorimg5, lockPixel, stamp) == stamp) return;
+    for (int i = 0; i < 16; ++i) {
+        uint value = packUnorm4x8(texelFetch(lightmap, ivec2(0, i), 0));
+        imageStore(colorimg5, ivec2(i, row), uvec4(value));
+    }
+}
+
 void main() {
+    captureWaterLightmap();
     float alias = mc_Entity.x;
     if (alias >= 6000.0 && alias <= 6010.0) {
         alias = alias == 6000.0 || alias == 6003.0 || alias == 6010.0 ? 101.0 : 102.0;

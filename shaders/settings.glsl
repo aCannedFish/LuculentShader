@@ -103,6 +103,9 @@ const int noiseTextureResolution = 1024;
 // colortex0：场景颜色。用 16 位浮点保存，才能存下大于 1.0 的高光值，
 // 后面的色调映射（tone mapping）才有意义。若用 RGBA8，超过 1.0 会被直接截断。
 const int colortex0Format = RGBA16F;
+// UV, normal and tint refer to the same alpha-tested native fragment.
+const int shadowcolor1Format = RGBA32F;
+const int colortex5Format = R32UI;
 
 // colortex1：前期为几何数据，透明阶段 RG 为水参数，BA 为独立雨层矩。
 // 雨层光学深度叠加可超过 1，半浮点同时保留暗色亮度矩的精度。
@@ -132,6 +135,7 @@ const int colortex14Format = RGBA16F;
 const int colortex15Format = RGBA16F;
 */
 
+const bool colortex5Clear = false;
 const bool colortex0Clear = true;
 // Opaque radiance mips retain sky coverage until deferred1 fills the background.
 const vec4 colortex0ClearColor = vec4(0.0, 0.0, 0.0, 0.0);
@@ -581,12 +585,10 @@ const vec4 colortex9ClearColor = vec4(0.0, 0.0, 0.0, 0.0);
 #if ENABLE_COLOURED_LIGHTING == 1 || GI_QUALITY > 0
 /*
 const int colortex8Format = RGBA16F;
-const int colortex5Format = R32UI;
 const int colortex10Format = RGBA32F;
 const int colortex11Format = RGBA8;
 */
 const bool colortex8Clear = false;
-const bool colortex5Clear = false;
 const bool colortex10Clear = false;
 const bool colortex11Clear = false;
 #endif

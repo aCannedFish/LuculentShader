@@ -566,7 +566,10 @@ float lightmapLevel(float coordinate) {
     return clamp((coordinate - 0.03125) / 0.9375, 0.0, 1.0);
 }
 
+bool samplingWaterCaster = false;
+vec3 waterLightmapLevel(float level);
 vec3 lightmapTexel(vec2 pixel) {
+    if (samplingWaterCaster && pixel.x < 0.5) return waterLightmapLevel(pixel.y);
     return toLinearSpace(texture(lightmap, (pixel + 0.5) / 16.0).rgb);
 }
 
@@ -4314,268 +4317,175 @@ bool transparentLayerInFront(float sceneDepth, float waterDepth, float coverage)
 
 #endif
 
-/* 相机看不到的倒影遮挡：沿反射光线在不透明阴影贴图里步进。
- *
- * 屏幕空间光线从树冠、桥面后方穿过时，深度缓冲无法区分“在几何体后方”与
- * “被几何体挡住”。阴影贴图从日月方向记录了另一层表面，可以补上这部分信息：
- *   - 光线点在贴图表面前方/后方的符号改变，且两侧贴图深度连续，
- *     说明光线穿过了真实表面。
- *       前 -> 后：从受光面进入实体，命中点就在穿越处。
- *       后 -> 前：从实体内部穿出受光面（桥底、树冠下方的水面），
- *                 之前已经打在相机和日月都看不到的背面上。
- *   - 贴图深度在穿越处跳变，说明只是穿过了阴影边界（空气），不算遮挡。
- * 前后判断留有死区，贴着地面掠过的光线不会因纹素量化被误判为进入地面。
- * 光线离开阴影贴图覆盖范围即停止，远处的遮挡仍由天光衰减近似。
- * 屏幕命中优先；只有遮挡点明显更近时（桥底、树冠下方）才取代屏幕命中。
+/* The camera and sun depth maps provide two views of the same geometry.
+ * The sun view supplies alpha-tested albedo, normal and light levels for
+ * visible shadow casters. Only a ray/surface intersection can return colour.
  */
-#ifndef LIB_REFLECTION_OCCLUSION_GLSL
-#define LIB_REFLECTION_OCCLUSION_GLSL
+uniform sampler2D shadowcolor1;
+uniform sampler2D depthtex1;
 
-
-
-
-
-// 步进距离（方块）：覆盖常见的树冠、桥面、屋檐高度。
-const float REFLECTION_OCCLUSION_RANGE = 24.0;
-
-// 光线点相对贴图表面的有符号距离（方块，正值在表面后方）。
-// covered 为假表示已离开阴影贴图。
-float reflectionShadowSeparation(vec3 clip, out bool covered) {
-    vec3 coordinate = distortShadow(clip) * 0.5 + 0.5;
-    covered = all(greaterThan(coordinate, vec3(0.0))) && all(lessThan(coordinate, vec3(1.0)));
-    float mapDepth = texture(shadowtex1, shadowTexelCenter(coordinate.xy)).r;
-    return shadowDepthToBlocks(coordinate.z - mapDepth);
+#if ENABLE_COLOURED_LIGHTING == 0 && GI_QUALITY == 0
+layout(r32ui, binding=5) uniform uimage2D colorimg5;
+#endif
+vec3 waterLightmapLevel(float level) {
+    ivec2 p = ivec2(clamp(level, 0.0, 15.0), imageSize(colorimg5).y - 1);
+    return toLinearSpace(unpackUnorm4x8(imageLoad(colorimg5, p).r).rgb);
 }
 
-// 点在相机深度缓冲之后（或在屏幕外）：相机看不到它，可能在实体内部。
-bool reflectionHiddenFromCamera(sampler2D depths, vec3 pointView) {
-    vec4 clip = gbufferProjection * vec4(pointView, 1.0);
-    if (clip.w <= 0.0) {
-        return true;
-    }
-    vec2 uv = clip.xy / clip.w * 0.5 + 0.5;
-    if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) {
-        return true;
-    }
-    float depth = texture(depths, uv).r;
-    return depth < 0.999999 && -pointView.z > -screenToView(uv, depth).z + 0.1;
+vec3 waterShadowPoint(vec2 uv, float depth) {
+    vec4 point = shadowProjectionInverse * vec4(undistortShadow(uv * 2.0 - 1.0),
+        depth * 2.0 - 1.0, 1.0);
+    return (shadowModelViewInverse * vec4(point.xyz / point.w, 1.0)).xyz;
 }
 
-// 返回 xyz：遮挡点（视图空间），w：1 表示被遮挡。
-// hidden：命中的是相机看不到的面，不能直接取屏幕颜色。
-vec4 reflectionShadowOcclusion(sampler2D depths, vec3 originView, vec3 directionView,
-                               out bool hidden, out bool confirmed) {
-    hidden = false;
-    confirmed = false;
-#if REFLECTION_OCCLUSION_STEPS > 0 && ENABLE_SHADOWS == 1 && SIMPLE_DIMENSION == 0
-    mat4 toShadow = shadowProjection * shadowModelView * gbufferModelViewInverse;
-    // 实体侧面不受光，阴影贴图里看不到从侧面穿出的光线（桥底进、桥侧出）。
-    // 穿出阴影区边界时若仍紧贴受光面之后（一格竖直厚度以内），
-    // 且相机也看不到该点，视为在遮挡物内部。
-    float sunHeight = abs((shadowModelView * vec4(0.0, 1.0, 0.0, 0.0)).z);
-    float solidDepth = 1.0 / max(sunHeight, 0.3);
-    // 正交投影：阴影裁剪坐标沿光线线性变化。
-    vec3 clipOrigin = (toShadow * vec4(originView, 1.0)).xyz;
-    vec3 clipDirection = mat3(toShadow) * directionView;
-    float texelBlocks = 2.0 / (shadowTextureResolution()
-                      * max(abs(shadowProjection[0][0]), EPSILON));
-    float previousT = 0.0;
-    float previousSeparation = 0.0;
-    int previousState = 0;
-    for (int index = 0; index <= REFLECTION_OCCLUSION_STEPS; index++) {
-        // 二次分布：近处密、远处疏，先发现紧贴水面的树冠和桥底。
-        float fraction = float(index) / float(REFLECTION_OCCLUSION_STEPS);
-        float t = 0.25 + (REFLECTION_OCCLUSION_RANGE - 0.25) * fraction * fraction;
-        vec3 clip = clipOrigin + clipDirection * t;
-        // 畸变后的纹素在远处更大，按当前位置估计一个纹素对应的方块数。
-        float distortion = (1.0 - SHADOW_MAP_BIAS) + length(clip.xy) * SHADOW_MAP_BIAS;
-        // 径向是畸变最强的方向，用它作保守估计。
-        float texel = texelBlocks * distortion * distortion / (1.0 - SHADOW_MAP_BIAS);
-        bool covered;
-        float separation = reflectionShadowSeparation(clip, covered);
-        if (!covered) {
-            break;
-        }
-        float deadZone = 0.15 + texel;
-        int state = separation > deadZone ? 1 : (separation < -deadZone ? -1 : previousState);
-        // 光线经阴影边界进入阴影区后，若紧贴某个受光面之后（两格竖直厚度以内）
-        // 且相机也看不到，它已在该实体内部：山体侧面被树影遮住时，
-        // 阴影贴图看不到入口，旧版因此透过叶丛露出天空。
-        // 树冠、桥面下方的空气离受光的顶面至少隔着叶层或桥面本身，不受影响。
-        vec3 point = originView + directionView * t;
-        if (index > 0 && state > 0 && previousState > 0 && separation <= solidDepth * 2.0
-            && reflectionHiddenFromCamera(depths, point)) {
-            hidden = true;
-            return vec4(point, 1.0);
-        }
-        if (index > 0 && previousState != 0 && state != previousState) {
-            // 二分到约一个纹素，再看贴图深度在穿越处是否连续。
-            float low = previousT;
-            float high = t;
-            float lowSeparation = previousSeparation;
-            float highSeparation = separation;
-            for (int iteration = 0; iteration < 5; iteration++) {
-                float mid = (low + high) * 0.5;
-                bool midCovered;
-                float midSeparation = reflectionShadowSeparation(clipOrigin + clipDirection * mid,
-                                                                 midCovered);
-                if ((midSeparation > 0.0) == (highSeparation > 0.0)) {
-                    high = mid;
-                    highSeparation = midSeparation;
-                } else {
-                    low = mid;
-                    lowSeparation = midSeparation;
-                }
-            }
-            // 光线点本身最多移动 high-low；超出部分来自贴图深度跳变（阴影边界）。
-            float jump = abs(highSeparation - lowSeparation) - (high - low);
-            if (jump <= 0.35 + texel * 2.5) {
-                hidden = state < 0;
-                confirmed = state > 0;
-                float hitT = state > 0 ? high : low;
-                return vec4(originView + directionView * hitT, 1.0);
-            }
-            vec3 inside = originView + directionView * low;
-            if (state < 0 && lowSeparation <= solidDepth
-                && reflectionHiddenFromCamera(depths, inside)) {
-                hidden = true;
-                return vec4(inside, 1.0);
+vec3 waterShadowCoordinate(vec3 worldRelative) {
+    vec4 projected = shadowProjection * shadowModelView * vec4(worldRelative, 1.0);
+    return distortShadow(projected.xyz / projected.w) * 0.5 + 0.5;
+}
+
+// Decode native opaque samples independently of any water or glass in front.
+vec3 waterCasterRecord(ivec2 pixel) {
+    return texelFetch(shadowcolor1, pixel, 0).rgb;
+}
+
+vec3 waterRecordNormal(vec3 record) {
+    return decodeNormal(mod(floor(record.xy / 256.0), 256.0) / 255.0);
+}
+
+vec3 waterCasterNormal(vec2 uv) {
+    ivec2 pixel = ivec2(uv * vec2(textureSize(shadowcolor1, 0)));
+    return waterRecordNormal(waterCasterRecord(pixel));
+}
+
+vec2 waterPhase(vec3 record) {
+    return (floor(record.xy / 65536.0) + 0.5) / 16.0;
+}
+
+// Reconstruct the sprite's texel footprint with surface-compatible neighbours.
+// Select original shaded-material texels on that grid, rather than magnifying
+// the oblique grid of the shadow texture or sampling an unbound sprite atlas.
+vec3 waterCasterAlbedo(ivec2 pixel, vec3 record, vec3 normal, vec3 hit) {
+    ivec2 size = textureSize(shadowcolor1, 0);
+    vec2 fraction = waterShadowCoordinate(hit).xy * vec2(size) - (vec2(pixel) + 0.5);
+    vec2 phase = waterPhase(record);
+    vec2 gradients[2];
+    for (int axis = 0; axis < 2; ++axis) {
+        ivec2 stride = axis == 0 ? ivec2(1, 0) : ivec2(0, 1);
+        gradients[axis] = vec2(0.0);
+        float best = 1e20;
+        for (int side = -1; side <= 1; side += 2) {
+            ivec2 p = clamp(pixel + side * stride, ivec2(0), size - 1);
+            vec3 other = waterCasterRecord(p);
+            if (dot(normal, waterRecordNormal(other)) < 0.96) continue;
+            vec3 point = waterShadowPoint((vec2(p) + 0.5) / vec2(size), texelFetch(shadowtex1, p, 0).r);
+            if (abs(dot(point - hit, normal)) > 0.025) continue;
+            vec2 delta = (mod(waterPhase(other) - phase + 8.0, 16.0) - 8.0) * float(side);
+            if (dot(delta, delta) < best) {
+                best = dot(delta, delta);
+                gradients[axis] = delta;
             }
         }
-        if (state != 0) {
-            previousState = state;
+    }
+    vec2 targetCell = mod(floor(phase + gradients[0] * fraction.x + gradients[1] * fraction.y), 16.0);
+    if (all(equal(floor(phase), targetCell))) return mod(record, 256.0) / 255.0;
+    float closest = 10.0;
+    vec3 selected = record;
+    for (int x = -1; x <= 1; ++x) {
+        for (int y = -1; y <= 1; ++y) {
+            ivec2 p = clamp(pixel + ivec2(x,y), ivec2(0), size - 1);
+            vec3 other = waterCasterRecord(p);
+            if (any(notEqual(floor(waterPhase(other)), targetCell))
+                || dot(normal, waterRecordNormal(other)) < 0.96) continue;
+            vec3 point = waterShadowPoint((vec2(p) + 0.5) / vec2(size), texelFetch(shadowtex1, p, 0).r);
+            float error = length(point - hit);
+            if (error < closest && abs(dot(point - hit, normal)) < 0.025) {
+                closest = error;
+                selected = other;
+            }
         }
-        previousT = t;
-        previousSeparation = separation;
+    }
+    return mod(selected, 256.0) / 255.0;
+}
+
+// If the second view found a surface also seen by the camera, keep its full
+// native material shading. A depth mismatch means an intervening object.
+bool waterCameraSees(vec3 hit, out vec2 uv) {
+    if (hit.z >= -near) return false;
+    vec4 clip = gbufferProjection * vec4(hit, 1.0);
+    uv = clip.xy / clip.w * 0.5 + 0.5;
+    ivec2 size = textureSize(depthtex1, 0);
+    ivec2 pixel = ivec2(floor(uv * vec2(size)));
+    if (any(lessThan(pixel, ivec2(0))) || any(greaterThanEqual(pixel, size))) return false;
+    float depth = texelFetch(depthtex1, pixel, 0).r;
+    vec3 point = screenToView((vec2(pixel) + 0.5) / vec2(size), depth);
+    return depth < 0.999999 && length(point - hit) < max(0.008, -hit.z * 2.0 / viewHeight);
+}
+
+// Intersect planes observed by the sun, then reproject the proposed hit to
+// validate actual geometry and texture coverage before shading that surface.
+vec4 waterSunViewHit(vec3 originView, vec3 directionView, float maximum, out float hitDistance) {
+    hitDistance = -1.0;
+#if ENABLE_SHADOWS == 1 && SIMPLE_DIMENSION == 0
+    vec3 origin = viewToWorld(originView);
+    vec3 ray = mat3(gbufferModelViewInverse) * directionView;
+    vec2 bestUv = vec2(-1.0);
+    float nearest = min(48.0, maximum);
+    float range = nearest;
+    for (int stepIndex = 0; stepIndex <= max(REFLECTION_OCCLUSION_STEPS, 6); ++stepIndex) {
+        float u = float(stepIndex) / float(max(REFLECTION_OCCLUSION_STEPS, 6));
+        float probeT = 0.03 + range * u * u;
+        vec3 shadow = waterShadowCoordinate(origin + ray * probeT);
+        if (any(lessThanEqual(shadow, vec3(0.0))) || any(greaterThanEqual(shadow, vec3(1.0)))) break;
+        vec2 pixel = shadowTexelCenter(shadow.xy);
+        float depth = textureLod(shadowtex1, pixel, 0.0).r;
+        if (depth >= 0.999999) continue;
+        vec3 plane = waterShadowPoint(pixel, depth);
+        vec3 normal = waterCasterNormal(pixel);
+        float cosine = dot(normal, ray);
+        if (abs(cosine) < 0.015) continue;
+        if (cosine > 0.0 && textureLod(shadowcolor1, pixel, 0.0).b < 65536.0) continue;
+        float t = dot(plane - origin, normal) / cosine;
+        if (t <= 0.008 || t >= nearest) continue;
+        vec3 hit = origin + ray * t;
+        vec3 checkCoord = waterShadowCoordinate(hit);
+        if (any(lessThanEqual(checkCoord, vec3(0.0))) || any(greaterThanEqual(checkCoord, vec3(1.0)))) continue;
+        pixel = shadowTexelCenter(checkCoord.xy);
+        depth = textureLod(shadowtex1, pixel, 0.0).r;
+        if (depth >= 0.999999) continue;
+        vec3 observed = waterShadowPoint(pixel, depth);
+        vec3 observedNormal = waterCasterNormal(pixel);
+        if (abs(dot(hit - observed, observedNormal)) > 0.018
+            || length(hit - observed) > 0.35 || dot(normal, observedNormal) < 0.96) continue;
+        nearest = t;
+        bestUv = pixel;
+    }
+    if (bestUv.x >= 0.0) {
+        hitDistance = nearest;
+        ivec2 mapSize = textureSize(shadowcolor1, 0);
+        ivec2 pixel = ivec2(bestUv * vec2(mapSize));
+        vec3 record = waterCasterRecord(pixel);
+        vec3 normal = waterRecordNormal(record);
+        vec3 albedo = toLinearSpace(waterCasterAlbedo(pixel, record, normal, origin + ray * nearest));
+        float packedLight = mod(floor(record.z / 256.0), 256.0);
+        vec2 levels = vec2(mod(packedLight, 16.0), floor(packedLight / 16.0));
+        vec2 lm = (levels + 0.5) / 16.0;
+        vec3 viewNormal = mat3(gbufferModelView) * normal;
+        vec3 hitView = originView + directionView * nearest;
+        float front = textureLod(shadowtex0, bestUv, 0.0).r;
+        float solid = textureLod(shadowtex1, bestUv, 0.0).r;
+        vec3 transfer = vec3(1.0);
+        if (shadowDepthToBlocks(solid - front) > 0.02) {
+            vec4 cover = textureLod(shadowcolor0, bestUv, 0.0);
+            transfer = abs(cover.a - 0.5) < 0.1 ? cover.rgb : vec3(0.0);
+        }
+        samplingWaterCaster = true;
+        vec3 radiance = computeSurfaceLighting(albedo, viewNormal, lm, transfer, 1.0, hitView);
+        samplingWaterCaster = false;
+        return vec4(radiance, 1.0);
     }
 #endif
     return vec4(0.0);
 }
-
-// 阴影视图保留的原生材质提供离屏命中的颜色，避免整栋建筑退化成无纹理剪影。
-// 只接受不透明/镂空材质，并核对两张深度：水和玻璃覆盖的颜色不能替代其后方表面。
-vec3 reflectionShadowMaterial(vec3 hitView, vec3 ambient, out bool validMaterial) {
-    validMaterial = false;
-    vec4 projected = shadowProjection * shadowModelView * gbufferModelViewInverse
-        * vec4(hitView, 1.0);
-    vec3 coordinate = distortShadow(projected.xyz / max(projected.w, EPSILON)) * 0.5 + 0.5;
-    if (any(lessThan(coordinate, vec3(0.0))) || any(greaterThan(coordinate, vec3(1.0)))) {
-        return ambient;
-    }
-    vec2 uv = shadowTexelCenter(coordinate.xy);
-    vec4 material = texture(shadowcolor0, uv);
-    bool opaque = abs(material.a - 1.0) < 0.08 || abs(material.a - 0.25) < 0.08;
-    float separation = abs(shadowDepthToBlocks(texture(shadowtex0, uv).r
-        - texture(shadowtex1, uv).r));
-    if (!opaque || separation > 0.1) {
-        return ambient;
-    }
-    validMaterial = true;
-    // 回退环境原先含0.3平均反照率；现在改用采集到的实际反照率。
-    return toLinearSpace(material.rgb) * ambient / 0.3;
-}
-
-// 遮挡点的辐射度：屏幕上可见时取屏幕颜色；被挡住的背面、底面只受环境光照亮，
-// 用附近可见面的颜色压暗近似；离屏或投影落在天空上时用调用者给的暗环境色。
-// scene 的 alpha 是覆盖/镂空类别标记，RGB始终是非预乘的线性辐射。
-vec3 reflectionOccluderRadiance(sampler2D scene, sampler2D depths, vec3 hitView,
-                                bool hidden, vec3 ambient) {
-    bool validMaterial;
-    vec3 materialFallback = reflectionShadowMaterial(hitView, ambient, validMaterial);
-    vec4 clip = gbufferProjection * vec4(hitView, 1.0);
-    if (clip.w <= 0.0) {
-        return materialFallback;
-    }
-    vec2 uv = clip.xy / clip.w * 0.5 + 0.5;
-    if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) {
-        return materialFallback;
-    }
-    float depth = texture(depths, uv).r;
-    if (depth >= 0.999999) {
-        return materialFallback;
-    }
-    float sceneDistance = -screenToView(uv, depth).z;
-    float hitDistance = -hitView.z;
-    // 可见面与遮挡点不在同一深度时，它是别的物体：更远的是透过叶隙看到的山，
-    // 更近的是挡在前面的树叶、树干。借用它们压暗后的颜色会在倒影里
-    // 沿前景轮廓画出细黑边，统一使用平滑的环境色。
-    if (abs(sceneDistance - hitDistance) > max(1.0, hitDistance * 0.04)) {
-        return materialFallback;
-    }
-    vec4 radiance = textureLod(scene, uv, 0.0);
-    vec3 surface = radiance.rgb;
-    if (!hidden) {
-        return surface;
-    }
-    // 有实际材质时直接按当地环境光估计背面，避免将已受阴影的屏幕颜色再压暗。
-    if (validMaterial) {
-        return materialFallback;
-    }
-    // 无有效材质的隐藏面继续保留有界的原有近似。
-    return min(surface * 0.35, ambient * 2.0 + surface * 0.1);
-}
-
-// 被挡住的面朝向光线来处：陡直向上的光线打到底面（桥底、树冠下方），
-// 只受下半球环境光；平缓的光线打到侧面（树影里的山坡），环境光更亮。
-// 0.3 近似常见方块的反照率。rayWorld 为世界空间的反射方向。
-vec3 reflectionHiddenAmbient(vec3 rayWorld, vec2 lmCoord) {
-    return materialAmbientEnvironment(-rayWorld, lmCoord) * 0.3;
-}
-
-// 阴影中的空气也可能位于遮挡物之后。原生占用只为隐藏命中提供辅助证据，
-// 不产生可见方块或颜色，避免将叶隙后的空气伪造成压黑的反射表面。
-bool reflectionHiddenHitSupported(vec3 pointView) {
-#if defined(SIMPLE_VARYING) && (ENABLE_COLOURED_LIGHTING == 1 || GI_QUALITY > 0)
-    if (!lpvHeaderValid(texelFetch(colortex8, ivec2(0), 0))) {
-        return false;
-    }
-    ivec3 cell = ivec3(floor(viewToAbsoluteWorld(pointView))) - lpvOrigin(cameraPosition);
-    if (!lpvInside(cell)) {
-        return false;
-    }
-    return lpvFullCubeGeometry(cell) && lpvOpaque(lpvVoxel(cell));
-#else
-    return false;
-#endif
-}
-
-// rgb：遮挡物辐射度，a：遮挡权重。REFLECTION_OCCLUSION_STEPS 为 0 时恒为 0。
-// hitDistance：遮挡点到起点的距离，未遮挡时为 0。
-vec4 reflectionOcclusion(sampler2D scene, sampler2D depths, vec3 originView,
-                         vec3 directionView, vec3 ambient, out float hitDistance) {
-    // GI体素只代表一格占用与平均颜色，不能作为镜面可见表面。这里查询
-    // 原生阴影深度与alpha轮廓，使楼梯、半砖和植物保留实际光栅形状。
-    bool hidden;
-    bool confirmed;
-    vec4 hit = reflectionShadowOcclusion(depths, originView, directionView, hidden, confirmed);
-    hitDistance = 0.0;
-    if (hit.w <= 0.0) {
-        return vec4(0.0);
-    }
-    hitDistance = length(hit.xyz - originView);
-    float confidence = confirmed || reflectionHiddenHitSupported(hit.xyz) ? 1.0 : 0.5;
-    // 隐藏面使用同一原生GI场；确认的受光面保留直射，背面不凭空获得日照。
-    vec3 normalView = -directionView;
-    ambient += companionIndirect(hit.xyz, normalView) * 0.3;
-    if (confirmed && !hidden) {
-        vec3 light = getLightDirView();
-        float cloud = cloudProjectedShadow(viewToAbsoluteWorld(hit.xyz),
-            normalize(mat3(gbufferModelViewInverse) * light));
-        ambient += (getSunLightColor() + getMoonLightColor())
-            * max(dot(normalView, light), 0.0) * cloud * 0.3;
-    }
-    return vec4(reflectionOccluderRadiance(scene, depths, hit.xyz, hidden, ambient), confidence);
-}
-
-// 遮挡点明显比屏幕命中近：屏幕光线从桥底、树冠下方穿过，在远处才打到
-// 可见景物（桥后的树林、对岸的山），这个屏幕命中不是真正的倒影。
-// 留出余量，同一表面上两种方法的命中误差不会互相覆盖。
-bool reflectionOcclusionCloser(vec4 occlusion, float occlusionDistance, float screenDistance) {
-    return occlusion.a > 0.75 && (screenDistance <= 0.0
-        || occlusionDistance < screenDistance - max(0.15, screenDistance * 0.01));
-}
-
-#endif
 
 /* 空气到水的折射。由水面法线和折射率确定一条 Snell 光线，再求水底取样位置。
  * 水面覆盖和水底表面的边界提前收窄偏移，不在不连续的深度之间迭代跳转。
@@ -4584,7 +4494,7 @@ bool reflectionOcclusionCloser(vec4 occlusion, float occlusionDistance, float sc
 #define LIB_WATER_REFRACTION_GLSL
 
 
-uniform sampler2D colortex14;
+
 
 // 深度属于离散像素；法线、位置与颜色必须使用同一像素中心。
 vec2 waterBedUv(vec2 uv) {
@@ -4642,67 +4552,7 @@ vec3 waterTransmissionColor(sampler2D scene, sampler2D opaqueDepth, vec2 uv,
     return total > 0.00001 ? sum / total : texture(scene, centreUv).rgb;
 }
 
-// 只接受同一水位下的原生几何；屏外和岸上前景没有可用于水底的颜色。
-bool waterRefractionDomain(vec2 uv, vec3 origin, sampler2D opaqueDepth,
-                           sampler2D geometry, sampler2D parameters) {
-    vec2 inset = 1.0 / vec2(viewWidth, viewHeight);
-    if (any(lessThan(uv, inset)) || any(greaterThan(uv, 1.0 - inset))) return false;
-    vec2 centre = waterBedUv(uv);
-    vec4 water = readWaterSurface(geometry, parameters, centre);
-    if (water.a <= 0.001) return false;
-    vec3 interfacePoint = viewToAbsoluteWorld(waterSurfacePosition(centre, water.a));
-    if (abs(interfacePoint.y - origin.y) > 0.25) return false;
-    float depth = texture(opaqueDepth, centre).r;
-    if (depth >= 0.999999) return false;
-    vec3 point = viewToAbsoluteWorld(screenToView(centre, depth));
-    return point.y < interfacePoint.y - 0.005;
-}
-
-// 对四个邻近传播结果取真实距离的最小值，不插值种子坐标，避免跨Voronoi边界跳动。
-float waterBoundaryDistance(vec2 uv, sampler2D boundaryField) {
-    vec2 size = vec2(viewWidth, viewHeight);
-    vec2 point = uv * size * 0.5;
-    vec2 base = floor(point - 0.5);
-    float distance = min(min(uv.x, 1.0 - uv.x) * size.x,
-        min(uv.y, 1.0 - uv.y) * size.y);
-    for (int x = 0; x < 2; x++) {
-        for (int y = 0; y < 2; y++) {
-            vec2 pixel = clamp(base + vec2(float(x), float(y)), vec2(0.0), ceil(size * 0.5) - 1.0);
-            vec4 seed = texture(boundaryField, (pixel + 0.5) / size);
-            if (seed.a > 0.5) distance = min(distance, length(seed.xy - point) * 2.0);
-        }
-    }
-    return max(distance - 3.0, 0.0);
-}
-
-// 在两倍偏移距离内平滑收窄，避免硬拒绝、边界拉丝和两幅水底叠加。
-// 三像素余量覆盖半分辨率种子的位置误差及颜色滤波足迹。
-float waterRefractionBoundary(vec2 uv, vec2 offset, sampler2D boundaryField) {
-    float distance = waterBoundaryDistance(uv, boundaryField);
-    return smoothstep(0.0, max(2.0 * length(offset * vec2(viewWidth, viewHeight)), 0.01), distance);
-}
-
-vec2 waterRefractionUv(vec2 uv, vec3 position, vec3 normal, vec3 bedWorld,
-                       vec3 bedNormal, sampler2D opaqueDepth,
-                       sampler2D geometry, sampler2D parameters) {
-    if (WATER_REFRACTION_STRENGTH <= 0.0) return uv;
-    vec3 origin = viewToAbsoluteWorld(position);
-    if (!waterRefractionDomain(uv, origin, opaqueDepth, geometry, parameters)) return uv;
-    vec3 incident = normalize(position);
-    vec3 ray = refract(incident, normal, 1.0 / WATER_IOR);
-    vec3 worldRay = mat3(gbufferModelViewInverse) * ray;
-    float denominator = dot(bedNormal, worldRay);
-    if (abs(denominator) < 0.04 || worldRay.y > -0.02) return uv;
-    float distance = clamp(dot(bedNormal, bedWorld - origin) / denominator, 0.0, 48.0);
-    vec4 clip = gbufferProjection * vec4(position + ray * distance, 1.0);
-    if (clip.w <= 0.001) return uv;
-    vec2 offset = (clip.xy / clip.w * 0.5 + 0.5 - uv) * WATER_REFRACTION_STRENGTH;
-    if (length(offset * vec2(viewWidth, viewHeight)) < 0.01) return uv;
-    float boundary = waterRefractionBoundary(uv, offset, colortex14);
-    vec2 result = uv + offset * boundary;
-    return waterRefractionDomain(result, origin, opaqueDepth, geometry, parameters)
-        ? result : uv;
-}
+#include "/lib/water_ray.glsl"
 #endif
 
 /* 世界坐标中的雨滴波环。四个邻域滴点使用解析斜率，避免纹理动画的平铺和跳帧。
@@ -4755,7 +4605,6 @@ uniform sampler2D colortex9;
 uniform sampler2D colortex6;
 uniform sampler2D colortex7;
 uniform sampler2D depthtex0;
-uniform sampler2D depthtex1;
 uniform sampler2D colortex1;
 uniform sampler2D colortex2;
 #ifdef WORLD_BASE_OPTICS
@@ -4867,85 +4716,6 @@ bool waterReflectionSubmerged(vec2 uv, vec3 origin) {
     return viewToAbsoluteWorld(scene).y < viewToAbsoluteWorld(origin).y - 0.12;
 }
 
-// 水面与固体、玻璃材质共用同一套屏幕空间求交。
-vec4 traceWaterScene(vec3 origin, vec3 direction, float roughness,
-    out float distanceToHit, out float confidence) {
-    distanceToHit = 0.0;
-    confidence = 1.0;
-    // 水面本身不在不透明深度里，最近命中距离为 0：紧贴岸壁、树干的水面
-    // 必须能命中几厘米外的墙面。旧版 0.25 格的下限让每条岸线都带一条天空色亮带。
-    // 范围覆盖整个渲染距离，远山、远处树林不再渐变成天空。
-    // 水面以下（0.12 格余量）的像素对水面以上的光线不存在。
-    vec3 up = mat3(gbufferModelView) * vec3(0.0, 1.0, 0.0);
-    vec4 waterPlane = vec4(up, 0.12 - dot(up, origin));
-    int budget = WATER_REFLECTION_STEPS;
-#ifdef WORLD_GPU_BACKEND
-    // Contact reflections have little travel distance but need enough shrinking
-    // steps to resolve an actual bank rather than a broad depth approximation.
-    vec4 originClip = gbufferProjection * vec4(origin, 1.0);
-    vec2 originUv = originClip.xy / originClip.w * 0.5 + 0.5;
-    vec2 bedUv = reflectionPixelUv(originUv);
-    float bedDepth = texture(depthtex1, bedUv).r;
-    if (bedDepth < 0.999999) {
-        float separation = length(screenToView(bedUv, bedDepth) - origin);
-        if (separation < 1.0) budget = max(budget, 32);
-    }
-#endif
-    ScreenReflectionHit traced = traceAdaptiveReflectionDetailed(colortex6, depthtex1,
-        origin, direction, 0.001, far, budget, waterPlane);
-    vec4 hit = vec4(traced.uv, traced.distance, traced.coverage);
-    confidence = traced.confidence;
-    // 用命中像素上的可见表面判断是否在水下；薄命中时光线点本身位于物体内部。
-    if (hit.a <= 0.0 || waterReflectionSubmerged(hit.xy, origin)) {
-        return vec4(0.0);
-    }
-    distanceToHit = hit.z;
-    float hitDepth = reflectionSceneDepth(depthtex1, hit.xy);
-    vec4 radiance = filteredWaterReflection(hit.xy, distanceToHit, hitDepth, roughness);
-    return vec4(reflectionAirMedium(radiance.rgb, hit.z, direction), hit.a * radiance.a);
-}
-
-vec4 traceWaterScene(vec3 origin, vec3 direction, float roughness, out float distanceToHit) {
-    float confidence;
-    return traceWaterScene(origin, direction, roughness, distanceToHit, confidence);
-}
-
-// 自适应步进在镂空轮廓附近可能耗尽预算。已知有遮挡时，再用透视深度DDA
-// 找实际屏幕表面，优先恢复纹理；不会对整片天空重复追踪。
-vec4 recoverWaterScene(vec3 origin, vec3 direction, float roughness, out float distanceToHit) {
-    distanceToHit = 0.0;
-    vec3 up = mat3(gbufferModelView) * vec3(0.0, 1.0, 0.0);
-    vec4 waterPlane = vec4(up, 0.12 - dot(up, origin));
-    bool thinHit;
-    vec4 hit = traceScreenReflection(depthtex1, origin, direction, 0.001, far,
-        min(max(WATER_REFLECTION_STEPS, 24), 64), waterPlane, thinHit);
-    if (hit.a <= 0.0 || waterReflectionSubmerged(hit.xy, origin)) {
-        return vec4(0.0);
-    }
-    distanceToHit = hit.z;
-    vec4 radiance = filteredWaterReflection(hit.xy, hit.z,
-        reflectionSceneDepth(depthtex1, hit.xy), roughness);
-    return vec4(reflectionAirMedium(radiance.rgb, hit.z, direction), radiance.a);
-}
-
-// 屏幕光线未命中时，用阴影贴图判断相机看不到的遮挡（桥底、树冠下方、悬崖内侧）。
-// skyLevel 为水面处的天光可见度，决定被挡背面的环境光。
-vec4 waterReflectionOcclusion(vec3 origin, vec3 direction, float skyLevel,
-                              float screenDistance, out float hitDistance) {
-    vec3 rayWorld = normalize(mat3(gbufferModelViewInverse) * direction);
-    vec3 ambient = reflectionHiddenAmbient(rayWorld, vec2(0.0, 0.03125 + 0.9375 * skyLevel));
-#ifdef WORLD_GPU_BACKEND
-    vec3 up = mat3(gbufferModelView) * vec3(0.0, 1.0, 0.0);
-    vec4 waterPlane = vec4(up, 0.12 - dot(up, origin));
-    float maximum = screenDistance > 0.0
-        ? screenDistance + max(0.05, screenDistance * 0.015) : far;
-    return reflectionOcclusionPlane(colortex6, depthtex1, origin, direction, ambient,
-        waterPlane, maximum, hitDistance);
-#else
-    return reflectionOcclusion(colortex6, depthtex1, origin, direction, ambient, hitDistance);
-#endif
-}
-
 // 水的 Fresnel。物理上的 Schlick 曲线（F0 = 0.02，五次方）在常见的俯视角下
 // 几乎不反射，水面因此被水色主导。这里参考 Sildur 的做法：略高的 F0 与四次方
 // 曲线，使中等角度也能看到明显的天空和景物倒影；粗糙水面在掠射时略降低峰值。
@@ -4982,30 +4752,29 @@ vec3 waterEnvironment(vec3 originWorld, vec3 rayWorld, float skyVisibility, bool
 // Confidence guides temporal reuse; it never acts as a sky blend opacity.
 vec4 queryWaterRadiance(vec3 position, vec3 direction, float roughness, float skyLevel) {
     vec3 originWorld = viewToAbsoluteWorld(position);
-    float screenDistance;
-    float screenConfidence;
-    vec4 screen = traceWaterScene(position + mat3(gbufferModelView) * vec3(0.0, 0.001, 0.0),
-        direction, roughness, screenDistance, screenConfidence);
-    float worldDistance;
-    vec4 world = waterReflectionOcclusion(position, direction, skyLevel, screenDistance, worldDistance);
-    if (screen.a <= 0.0 && world.a > 0.0) {
-        vec3 origin = position + mat3(gbufferModelView) * vec3(0.0, 0.001, 0.0);
-        vec4 recovered = recoverWaterScene(origin, direction, roughness, screenDistance);
-        if (recovered.a > 0.0) {
-            screen = recovered;
+    vec2 uv = waterProjectPixel(position, vec2(1.0));
+    WaterRayHit hit = traceWaterGeometry(uv, position, direction, far, depthtex1);
+    bool visible = hit.distance > 0.0 && !waterReflectionSubmerged(hit.uv, position);
+    float maximum = visible ? max(hit.distance - 0.05, 0.0) : far;
+    float sunDistance;
+    vec4 sunView = REFLECTION_OCCLUSION_STEPS > 0
+        ? waterSunViewHit(position, direction, maximum, sunDistance) : vec4(0.0);
+    if (sunView.a > 0.0) {
+        vec2 witness;
+        if (waterCameraSees(position + direction * sunDistance, witness)) {
+            vec4 colour = filteredWaterReflection(witness, sunDistance,
+                reflectionSceneDepth(depthtex1, witness), roughness);
+            if (colour.a > 0.0) sunView.rgb = colour.rgb;
         }
+        return vec4(reflectionAirMedium(sunView.rgb, sunDistance, direction), 1.0);
     }
-    // 屏幕命中已经包含真实纹理和光照；同一距离的回退不能用平均环境色覆盖它。
-    if (reflectionOcclusionCloser(world, worldDistance, screenDistance)) {
-        return vec4(world.rgb, 0.9);
+    if (visible) {
+        vec4 sampleColor = filteredWaterReflection(hit.uv, hit.distance,
+            reflectionSceneDepth(depthtex1, hit.uv), roughness);
+        if (sampleColor.a > 0.0) return vec4(reflectionAirMedium(sampleColor.rgb, hit.distance, direction), 1.0);
     }
-    if (screen.a >= 0.999) return vec4(screen.rgb, 1.0);
-    // 缺少屏幕命中时仍保留隐藏面的保守回退；低置信度不能压掉已有真实纹理。
-    if (world.a > 0.0 && screen.a <= 0.0) return vec4(world.rgb, 0.6);
-    vec3 rayWorld = normalize(mat3(gbufferModelViewInverse) * direction);
-    vec3 environment = waterEnvironment(originWorld, rayWorld,
-        reflectionSkyLightWeight(skyLevel), false);
-    return vec4(mix(environment, screen.rgb, screen.a), 0.25);
+    vec3 rayWorld = mat3(gbufferModelViewInverse) * direction;
+    return vec4(waterEnvironment(originWorld, rayWorld, reflectionSkyLightWeight(skyLevel), false), 1.0);
 }
 
 // 折射改变水底的投影位置；吸收仍由采样处的真实水内距离决定。
@@ -5037,9 +4806,30 @@ vec3 applyWaterReflection(vec3 color, vec2 uv, float normalVariance) {
         * smoothstep(0.95, 0.995, surface.b);
     opticalNormal = mat3(gbufferModelView)
         * normalize(opticalNormal + vec3(-rainSlope.x, 0.0, -rainSlope.y));
-    vec2 transmittedUv = opaqueDepth < 0.999999
-        ? waterRefractionUv(uv, position, opticalNormal, opaqueWorld, receiverNormal,
-            depthtex1, colortex9, colortex1) : uv;
+    // Interpolate the interface index for the strength control; every enabled
+    // setting still follows one continuous ray through real scene depth.
+    vec3 ray = refract(incident, opticalNormal,
+        1.0 / mix(1.0, WATER_IOR, WATER_REFRACTION_STRENGTH));
+    WaterRayHit bedHit = WaterRayHit(uv, length(opaquePosition - position), false);
+    vec4 alternateBed = vec4(0.0);
+    float alternateDistance = -1.0;
+    if (WATER_REFRACTION_STRENGTH > 0.0) {
+        bedHit = traceWaterGeometry(uv, position, ray, 48.0, depthtex1);
+        if (bedHit.distance < 0.0 || bedHit.hidden) {
+            float extent = bedHit.distance < 0.0 ? 48.0 : bedHit.distance - 0.04;
+            alternateBed = waterSunViewHit(position, ray, extent, alternateDistance);
+            vec2 witness;
+            if (alternateBed.a > 0.0 && waterCameraSees(position + ray * alternateDistance, witness)) {
+                bedHit = WaterRayHit(witness, alternateDistance, false);
+                alternateBed.a = 0.0;
+            }
+        }
+        if (alternateBed.a <= 0.0 && bedHit.distance < 0.0 && opaqueDepth < 0.999999) {
+            bedHit = waterMissingReceiver(uv, position, ray, opaquePosition,
+                mat3(gbufferModelView) * receiverNormal, depthtex1);
+        }
+    }
+    vec2 transmittedUv = bedHit.uv;
     vec2 sourceUv = waterBedUv(transmittedUv);
     opaqueDepth = texture(depthtex1, sourceUv).r;
     opaquePosition = screenToView(sourceUv, min(opaqueDepth, 0.99999));
@@ -5053,7 +4843,7 @@ vec3 applyWaterReflection(vec3 color, vec2 uv, float normalVariance) {
         backgroundLayer = vec4(0.0);
     }
     float verticalDepth = max(originWorld.y - opaqueWorld.y, 0.0);
-    float waterDistance = opaqueDepth < 0.999999 ? length(opaquePosition - position) : 24.0;
+    float waterDistance = bedHit.distance >= 0.0 ? bedHit.distance : 48.0;
     waterDistance = clamp(waterDistance, 0.0, 48.0);
 #ifdef WORLD_BASE_OPTICS
     vec3 transmitted = applyTransparentLayer(waterTransmissionColor(colortex3, depthtex1,
@@ -5062,7 +4852,13 @@ vec3 applyWaterReflection(vec3 color, vec2 uv, float normalVariance) {
     vec3 transmitted = applyTransparentLayer(waterTransmissionColor(colortex6, depthtex1,
         transmittedUv, opaqueWorld, receiverNormal, originWorld.y), backgroundLayer);
 #endif
-    if (opaqueDepth < 0.999999) {
+    if (alternateBed.a > 0.0) {
+        waterDistance = alternateDistance;
+        opaqueWorld = viewToAbsoluteWorld(position + ray * alternateDistance);
+        verticalDepth = max(originWorld.y - opaqueWorld.y, 0.0);
+        transmitted = alternateBed.rgb;
+    }
+    if (opaqueDepth < 0.999999 && alternateBed.a <= 0.0) {
         transmitted *= waterCausticGain(opaqueWorld, receiverNormal, originWorld.y, surface.b);
     }
 
@@ -5083,7 +4879,7 @@ vec3 applyWaterReflection(vec3 color, vec2 uv, float normalVariance) {
     vec3 geometricNormal = normalize(mat3(gbufferModelView) * vec3(0.0, 1.0, 0.0));
     // 水下窗口需要清晰的波浪起伏；水上倒影使用更平缓的光学斜率，
     // 避免同一组放大法线把相邻倒影拉成相互交叠的碎片。
-    vec3 reflectionNormal = normalize(mix(geometricNormal, normal, 0.45));
+    vec3 reflectionNormal = opticalNormal;
     vec3 direction = normalize(reflect(incident, reflectionNormal));
     float visibility = reflectionGeometricVisibility(dot(geometricNormal, -incident),
         dot(geometricNormal, direction), roughness);
