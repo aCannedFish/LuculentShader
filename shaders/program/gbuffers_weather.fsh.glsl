@@ -1058,45 +1058,8 @@ float cloudProjectedShadowDirect(vec3 world, vec3 lightDirection) {
     return mix(1.0, transmission, CLOUD_SHADOW_STRENGTH);
 }
 
-#ifdef WORLD_GPU_BACKEND
-// No world atlas in the conventional renderer baseline.
-
-#ifndef SIMPLE_WORLD_STORAGE_GLSL
-#define SIMPLE_WORLD_STORAGE_GLSL
-uniform sampler2D colortex6;
-uniform sampler2D noisetex;
-#endif
-
-
-// Points below the cloud layer on one light ray share its optical depth.
-const float CLOUD_SHADOW_CELL = 2.0;
-
-vec2 cloudShadowPlane(vec3 world, vec3 lightDirection) {
-    return world.xz + lightDirection.xz * (cloudAltitudeBounds().x - world.y) / lightDirection.y;
-}
-
-vec2 cloudShadowGridOrigin(vec3 lightDirection) {
-    return floor(cloudShadowPlane(cameraPosition, lightDirection) / CLOUD_SHADOW_CELL) * CLOUD_SHADOW_CELL;
-}
-#endif
 
 float cloudProjectedShadow(vec3 world, vec3 lightDirection) {
-#if defined(WORLD_GPU_BACKEND) && !defined(WORLD_BUILD_CLOUD_SHADOW)
-    vec2 altitude = cloudAltitudeBounds();
-    if (CLOUD_SHADOW_STRENGTH <= 0.0 || lightDirection.y <= 0.04 || world.y >= altitude.y) return 1.0;
-    // Interior-cloud receivers need their remaining partial optical depth.
-    if (world.y < altitude.x) {
-        ivec4 region = worldRegion(WORLD_REGION_CLOUD_SHADOW);
-        vec2 pixel = (cloudShadowPlane(world, lightDirection) - cloudShadowGridOrigin(lightDirection))
-            / CLOUD_SHADOW_CELL + vec2(region.zw) * 0.5;
-        vec2 border = min(pixel, vec2(region.zw) - pixel);
-        if (min(border.x, border.y) >= 1.0) {
-            vec4 cached = textureLod(colortex6,
-                (vec2(region.xy) + pixel) / vec2(textureSize(colortex6, 0)), 0.0);
-            if (cached.w == 1876.0) return cached.x;
-        }
-    }
-#endif
     return cloudProjectedShadowDirect(world, lightDirection);
 }
 
@@ -2569,17 +2532,11 @@ void writeGBuffers(vec3 color, vec3 normalView, vec2 lightmapCoord,
 
     // 目标 2：光照信息。后处理和调试视图都要用。
     fullOut2 = vec4(lm.x, lm.y, shadow, 0.0);
-#ifdef WORLD_GPU_BACKEND
-    // Attachment 5 holds opaque base radiance until deferred publishes source 4;
-    // that pass clears it before its later water-geometry lifetime begins.
-    fullOut3 = vec4(color, 1.0);
-#else
     // 无材质数据的几何清除后方表面遗留的PBR参数。
     fullOut3 = vec4(0.0);
     // 手部程序不映射该附件，也不生成写入，保证原生场景背景完整保留。
 #ifndef FIRST_PERSON_HAND
     fullOut4 = vec4(color, 1.0);
-#endif
 #endif
 }
 
@@ -2701,9 +2658,6 @@ vec3 applyFog(vec3 color, float distanceToCamera) {
 // Deferred applies its camera segment once; later particles/translucency retain
 // their forward fog. Stage values come from the fixed J9 RenderStage contract.
 vec3 applySurfaceFog(vec3 color, float distanceToCamera) {
-#ifdef WORLD_GPU_BACKEND
-    if (renderStage >= 8 && renderStage <= 15) return color;
-#endif
     return applyFog(color, distanceToCamera);
 }
 

@@ -1053,45 +1053,8 @@ float cloudProjectedShadowDirect(vec3 world, vec3 lightDirection) {
     return mix(1.0, transmission, CLOUD_SHADOW_STRENGTH);
 }
 
-#ifdef WORLD_GPU_BACKEND
-// No world atlas in the conventional renderer baseline.
-
-#ifndef SIMPLE_WORLD_STORAGE_GLSL
-#define SIMPLE_WORLD_STORAGE_GLSL
-uniform sampler2D colortex6;
-uniform sampler2D noisetex;
-#endif
-
-
-// Points below the cloud layer on one light ray share its optical depth.
-const float CLOUD_SHADOW_CELL = 2.0;
-
-vec2 cloudShadowPlane(vec3 world, vec3 lightDirection) {
-    return world.xz + lightDirection.xz * (cloudAltitudeBounds().x - world.y) / lightDirection.y;
-}
-
-vec2 cloudShadowGridOrigin(vec3 lightDirection) {
-    return floor(cloudShadowPlane(cameraPosition, lightDirection) / CLOUD_SHADOW_CELL) * CLOUD_SHADOW_CELL;
-}
-#endif
 
 float cloudProjectedShadow(vec3 world, vec3 lightDirection) {
-#if defined(WORLD_GPU_BACKEND) && !defined(WORLD_BUILD_CLOUD_SHADOW)
-    vec2 altitude = cloudAltitudeBounds();
-    if (CLOUD_SHADOW_STRENGTH <= 0.0 || lightDirection.y <= 0.04 || world.y >= altitude.y) return 1.0;
-    // Interior-cloud receivers need their remaining partial optical depth.
-    if (world.y < altitude.x) {
-        ivec4 region = worldRegion(WORLD_REGION_CLOUD_SHADOW);
-        vec2 pixel = (cloudShadowPlane(world, lightDirection) - cloudShadowGridOrigin(lightDirection))
-            / CLOUD_SHADOW_CELL + vec2(region.zw) * 0.5;
-        vec2 border = min(pixel, vec2(region.zw) - pixel);
-        if (min(border.x, border.y) >= 1.0) {
-            vec4 cached = textureLod(colortex6,
-                (vec2(region.xy) + pixel) / vec2(textureSize(colortex6, 0)), 0.0);
-            if (cached.w == 1876.0) return cached.x;
-        }
-    }
-#endif
     return cloudProjectedShadowDirect(world, lightDirection);
 }
 
@@ -2564,17 +2527,11 @@ void writeGBuffers(vec3 color, vec3 normalView, vec2 lightmapCoord,
 
     // 目标 2：光照信息。后处理和调试视图都要用。
     fullOut2 = vec4(lm.x, lm.y, shadow, 0.0);
-#ifdef WORLD_GPU_BACKEND
-    // Attachment 5 holds opaque base radiance until deferred publishes source 4;
-    // that pass clears it before its later water-geometry lifetime begins.
-    fullOut3 = vec4(color, 1.0);
-#else
     // 无材质数据的几何清除后方表面遗留的PBR参数。
     fullOut3 = vec4(0.0);
     // 手部程序不映射该附件，也不生成写入，保证原生场景背景完整保留。
 #ifndef FIRST_PERSON_HAND
     fullOut4 = vec4(color, 1.0);
-#endif
 #endif
 }
 
@@ -2691,9 +2648,6 @@ vec3 applyFog(vec3 color, float distanceToCamera) {
 // Deferred applies its camera segment once; later particles/translucency retain
 // their forward fog. Stage values come from the fixed J9 RenderStage contract.
 vec3 applySurfaceFog(vec3 color, float distanceToCamera) {
-#ifdef WORLD_GPU_BACKEND
-    if (renderStage >= 8 && renderStage <= 15) return color;
-#endif
     return applyFog(color, distanceToCamera);
 }
 
@@ -2709,153 +2663,6 @@ vec3 applySurfaceFog(vec3 color, float distanceToCamera) {
 
 
 
-#ifdef WORLD_PACKED_WATER
-/* Water geometry and radiance share one RGBA32F attachment. RGB carries three
- * finite 30-bit words; A remains a normal 0/1 blend mask so glass preserves it.
- * Layout: 12+12 normal bits, 32 depth bits, RGB9E5 radiance and a two-bit tag.
- */
-#ifndef SIMPLE_WORLD_WATER_PACKET_GLSL
-#define SIMPLE_WORLD_WATER_PACKET_GLSL
-#ifndef SIMPLE_WORLD_RAW_PACKING_GLSL
-#define SIMPLE_WORLD_RAW_PACKING_GLSL
-
-// Each word carries 30 bits in a normalized finite float. Exponents 1..128
-// avoid NaNs, infinities and subnormals; RGBA32F stores every bit unchanged.
-float worldRawFloat(uint value) {
-    uint mantissa = value & 0x007fffffu;
-    uint exponent = ((value >> 23u) + 1u) << 23u;
-    return uintBitsToFloat(exponent | mantissa);
-}
-
-uint worldRawUint(float value) {
-    uint word = floatBitsToUint(abs(value));
-    uint exponent = ((word >> 23u) & 255u) - 1u;
-    return (exponent << 23u) | (word & 0x007fffffu);
-}
-
-vec4 worldRawEncode(uvec4 words, bool valid, bool tagged) {
-    if (!valid) return vec4(0.0);
-    vec4 result = vec4(worldRawFloat(words.x), worldRawFloat(words.y),
-        worldRawFloat(words.z), -worldRawFloat(words.w));
-    if (tagged) result.x = -result.x;
-    return result;
-}
-
-bool worldRawValid(vec4 record) {
-    if (record.w >= 0.0) return false;
-    uvec4 words = floatBitsToUint(abs(record));
-    uvec4 exponents = (words >> 23u) & uvec4(255u);
-    return all(greaterThanEqual(exponents, uvec4(1u)))
-        && all(lessThanEqual(exponents, uvec4(128u)));
-}
-
-uvec4 worldRawDecode(vec4 record) {
-    return uvec4(worldRawUint(record.x), worldRawUint(record.y),
-        worldRawUint(record.z), worldRawUint(record.w));
-}
-// Read/write fields across the 30-bit word boundary, including full floats.
-void worldPutRawField(inout uvec4 words, uint value, int first, int bits) {
-    int word = first / 30;
-    int shift = first % 30;
-    value &= bits == 32 ? 0xffffffffu : (1u << uint(bits)) - 1u;
-    words[word] |= (value << uint(shift)) & 0x3fffffffu;
-    if (shift + bits > 30) words[word + 1] |= value >> uint(30 - shift);
-}
-
-uint worldGetRawField(uvec4 words, int first, int bits) {
-    int word = first / 30;
-    int shift = first % 30;
-    uint value = words[word] >> uint(shift);
-    if (shift + bits > 30) value |= words[word + 1] << uint(30 - shift);
-    return value & (bits == 32 ? 0xffffffffu : (1u << uint(bits)) - 1u);
-}
-
-
-#endif
-
-
-struct WaterSurfacePacket {
-    vec2 normal;
-    float depth;
-    vec3 scattering;
-    float coverage;
-};
-
-uint waterRgb9e5(vec3 radiance) {
-    vec3 colour = clamp(radiance, vec3(0.0), vec3(65408.0));
-    float peak = max(colour.r, max(colour.g, colour.b));
-    int exponent = clamp(int(floor(log2(max(peak, 1e-16)))) + 16, 0, 31);
-    float unit = exp2(float(exponent - 24));
-    uvec3 mantissa = uvec3(floor(colour / unit + 0.5));
-    if (max(mantissa.r, max(mantissa.g, mantissa.b)) > 511u && exponent < 31) {
-        exponent++;
-        unit *= 2.0;
-        mantissa = uvec3(floor(colour / unit + 0.5));
-    }
-    mantissa = min(mantissa, uvec3(511u));
-    return mantissa.r | (mantissa.g << 9u) | (mantissa.b << 18u) | (uint(exponent) << 27u);
-}
-
-vec3 waterRgb9e5Value(uint value) {
-    uvec3 mantissa = uvec3(value, value >> 9u, value >> 18u) & uvec3(511u);
-    return vec3(mantissa) * exp2(float(int(value >> 27u) - 24));
-}
-
-vec4 packWaterSurface(vec2 normal, float depth, vec3 scattering) {
-    uvec4 words = uvec4(0u);
-    uvec2 encoded = uvec2(round(clamp(normal, 0.0, 1.0) * 4095.0));
-    worldPutRawField(words, encoded.x, 0, 12);
-    worldPutRawField(words, encoded.y, 12, 12);
-    worldPutRawField(words, floatBitsToUint(depth), 24, 32);
-    worldPutRawField(words, waterRgb9e5(scattering), 56, 32);
-    worldPutRawField(words, 2u, 88, 2);
-    return vec4(worldRawFloat(words.x), worldRawFloat(words.y), worldRawFloat(words.z), 1.0);
-}
-
-WaterSurfacePacket unpackWaterSurface(vec4 packedValue) {
-    WaterSurfacePacket result = WaterSurfacePacket(vec2(0.5), 0.0, vec3(0.0), 0.0);
-    if (packedValue.a < 0.5) return result;
-    uvec4 words = uvec4(worldRawUint(packedValue.x), worldRawUint(packedValue.y),
-        worldRawUint(packedValue.z), 0u);
-    if (worldGetRawField(words, 88, 2) != 2u) return result;
-    result.normal = vec2(worldGetRawField(words, 0, 12), worldGetRawField(words, 12, 12)) / 4095.0;
-    result.depth = uintBitsToFloat(worldGetRawField(words, 24, 32));
-    result.scattering = waterRgb9e5Value(worldGetRawField(words, 56, 32));
-    result.coverage = 1.0;
-    return result;
-}
-
-WaterSurfacePacket readWaterPacket(sampler2D geometry, vec2 uv) {
-    ivec2 size = textureSize(geometry, 0);
-    vec2 coordinate = uv * vec2(size) - 0.5;
-    ivec2 nearest = clamp(ivec2(floor(uv * vec2(size))), ivec2(0), size - 1);
-    if (all(lessThan(abs(coordinate - round(coordinate)), vec2(0.0002)))) {
-        return unpackWaterSurface(texelFetch(geometry, nearest, 0));
-    }
-    ivec2 first = ivec2(floor(coordinate));
-    vec2 fraction = fract(coordinate);
-    WaterSurfacePacket sum = WaterSurfacePacket(vec2(0.0), 0.0, vec3(0.0), 0.0);
-    for (int x = 0; x < 2; x++) {
-        for (int y = 0; y < 2; y++) {
-            ivec2 pixel = clamp(first + ivec2(x, y), ivec2(0), size - 1);
-            WaterSurfacePacket value = unpackWaterSurface(texelFetch(geometry, pixel, 0));
-            float weight = (x == 0 ? 1.0 - fraction.x : fraction.x)
-                * (y == 0 ? 1.0 - fraction.y : fraction.y) * value.coverage;
-            sum.normal += value.normal * weight;
-            sum.depth += value.depth * weight;
-            sum.scattering += value.scattering * weight;
-            sum.coverage += weight;
-        }
-    }
-    if (sum.coverage < 0.5) return WaterSurfacePacket(vec2(0.5), 0.0, vec3(0.0), 0.0);
-    sum.normal /= sum.coverage;
-    sum.depth /= sum.coverage;
-    sum.scattering /= sum.coverage;
-    return sum;
-}
-#endif
-
-#endif
 
 
 // block.properties 将水映射到此 ID，避免玻璃也产生波浪。
@@ -2886,26 +2693,16 @@ bool validWaterMediumHistory(vec4 history) {
 // 水面几何与参数各自以 alpha=1 标记有效片元，玻璃以 alpha=0 保留这些数据。
 // 返回既有逻辑使用的布局：八面体法线 RG、天空可见度 B、线性视图深度 A。
 vec4 readWaterSurface(sampler2D geometry, sampler2D parameters, vec2 uv) {
-#ifdef WORLD_PACKED_WATER
-    WaterSurfacePacket packedSurface = readWaterPacket(geometry, uv);
-    if (packedSurface.coverage < 0.5) return vec4(0.0);
-    return vec4(packedSurface.normal, texture(parameters, uv).r, packedSurface.depth);
-#else
     vec4 surface = texture(geometry, uv);
     if (surface.a < 0.5) {
         return vec4(0.0);
     }
     float sky = texture(parameters, uv).r;
     return vec4(surface.rg, sky, surface.b);
-#endif
 }
 
 vec3 readWaterScattering(sampler2D geometry, sampler2D scattering, vec2 uv) {
-#ifdef WORLD_PACKED_WATER
-    return readWaterPacket(geometry, uv).scattering;
-#else
     return texture(scattering, uv).rgb;
-#endif
 }
 
 // 从透明水面附件的线性深度恢复位置，供水面合成与水深估计共用。
@@ -2946,11 +2743,7 @@ vec3 decodeWaterNormal(vec2 encoded) {
 // 缺少新元数据时退回屏幕探针，仍只接受水平水面并平均水深。
 vec2 estimateWaterMedium(sampler2D surfaces, sampler2D parameters) {
     if (hasCompanionLighting()) {
-#ifdef WORLD_GPU_BACKEND
-        vec4 medium = worldCameraWaterMedium();
-#else
         vec4 medium = texture(companionAtlas, vec2(0.5, 7.5) / companionAtlasSize());
-#endif
         if (abs(medium.w - 1573.0) < 0.5 && medium.z > 0.5) {
             return medium.xy;
         }
@@ -3421,10 +3214,8 @@ vec3 materialPointSpecular(SurfaceMaterial m, vec3 normalView, vec3 viewPosition
     vec3 position = companionPosition(viewPosition, companionOrigin);
     vec3 normal = normalize(mat3(gbufferModelViewInverse) * normalView);
     vec3 view = normalize(mat3(gbufferModelViewInverse) * -viewPosition);
-#ifndef WORLD_GPU_BACKEND
     float size = companionHeader().z;
     float tint = companionVolumeWeight(position, size, 1.0);
-#endif
     int count = int(companionHeader().y + 0.5);
     vec3 sum = vec3(0.0);
     for (int index = 0; index < LOCAL_LIGHT_COUNT; index++) {
@@ -3444,21 +3235,13 @@ vec3 materialPointSpecular(SurfaceMaterial m, vec3 normalView, vec3 viewPosition
         }
         vec4 source = companionLight(index, 1);
         float window = max(1.0 - squared * squared / pow(radius, 4.0), 0.0);
-#ifdef WORLD_GPU_BACKEND
-        WorldPosition receiver = worldPosition(viewToWorld(viewPosition), cameraPosition);
-        vec3 transmission = worldPointGlassFilter(colortex6, index, receiver, normal);
-#else
         vec3 transmission = mix(vec3(1.0), companionTransmission(index, position), tint);
-#endif
         vec3 visibility = companionShadow(index, -ray, radius, normal, transmission);
         vec3 radiance = source.rgb * window * window / (1.0 + squared)
                       * BLOCK_LIGHT_STRENGTH * anchor.w;
         sum += materialLightSpecular(m, normal, view, ray * inversesqrt(squared),
                                      radiance * visibility);
     }
-#ifdef WORLD_GPU_BACKEND
-    sum *= materialAnalyticEmitterWeight(m.roughness);
-#endif
     return sum;
 }
 
@@ -3866,15 +3649,9 @@ void main() {
     writeGBuffers(color, normalView, lmCoord, shadow, water ? MAT_WATER : MAT_SOLID, outputAlpha);
     // 水面数据以二值 alpha 替换，玻璃输出零值并保留它；玻璃颜色另存预乘层。
     // 线性深度位于 B，alpha 专门用于覆盖标记，避免透明混合破坏水面深度。
-#ifdef WORLD_PACKED_WATER
-    fullOut3 = topSurface
-        ? packWaterSurface(encodeWaterNormal(normalView), max(-vViewPos.z, 0.0), scatteringRadiance)
-        : vec4(0.0);
-#else
     fullOut3 = topSurface
         ? vec4(encodeWaterNormal(normalView), max(-vViewPos.z, 0.0), 1.0) : vec4(0.0);
     fullOut4 = topSurface ? vec4(scatteringRadiance, 1.0) : vec4(0.0);
-#endif
 #if DEBUG_VIEW == 0
     fullOut1 = topSurface ? vec4(skyVisibility, albedo.a, 0.0, 1.0) : vec4(0.0);
     fullOut2 = water ? vec4(0.0) : vec4(color * outputAlpha, outputAlpha);

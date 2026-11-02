@@ -1352,45 +1352,8 @@ float cloudProjectedShadowDirect(vec3 world, vec3 lightDirection) {
     return mix(1.0, transmission, CLOUD_SHADOW_STRENGTH);
 }
 
-#ifdef WORLD_GPU_BACKEND
-// No world atlas in the conventional renderer baseline.
-
-#ifndef SIMPLE_WORLD_STORAGE_GLSL
-#define SIMPLE_WORLD_STORAGE_GLSL
-uniform sampler2D colortex6;
-uniform sampler2D noisetex;
-#endif
-
-
-// Points below the cloud layer on one light ray share its optical depth.
-const float CLOUD_SHADOW_CELL = 2.0;
-
-vec2 cloudShadowPlane(vec3 world, vec3 lightDirection) {
-    return world.xz + lightDirection.xz * (cloudAltitudeBounds().x - world.y) / lightDirection.y;
-}
-
-vec2 cloudShadowGridOrigin(vec3 lightDirection) {
-    return floor(cloudShadowPlane(cameraPosition, lightDirection) / CLOUD_SHADOW_CELL) * CLOUD_SHADOW_CELL;
-}
-#endif
 
 float cloudProjectedShadow(vec3 world, vec3 lightDirection) {
-#if defined(WORLD_GPU_BACKEND) && !defined(WORLD_BUILD_CLOUD_SHADOW)
-    vec2 altitude = cloudAltitudeBounds();
-    if (CLOUD_SHADOW_STRENGTH <= 0.0 || lightDirection.y <= 0.04 || world.y >= altitude.y) return 1.0;
-    // Interior-cloud receivers need their remaining partial optical depth.
-    if (world.y < altitude.x) {
-        ivec4 region = worldRegion(WORLD_REGION_CLOUD_SHADOW);
-        vec2 pixel = (cloudShadowPlane(world, lightDirection) - cloudShadowGridOrigin(lightDirection))
-            / CLOUD_SHADOW_CELL + vec2(region.zw) * 0.5;
-        vec2 border = min(pixel, vec2(region.zw) - pixel);
-        if (min(border.x, border.y) >= 1.0) {
-            vec4 cached = textureLod(colortex6,
-                (vec2(region.xy) + pixel) / vec2(textureSize(colortex6, 0)), 0.0);
-            if (cached.w == 1876.0) return cached.x;
-        }
-    }
-#endif
     return cloudProjectedShadowDirect(world, lightDirection);
 }
 
@@ -2433,9 +2396,6 @@ vec3 applyFog(vec3 color, float distanceToCamera) {
 // Deferred applies its camera segment once; later particles/translucency retain
 // their forward fog. Stage values come from the fixed J9 RenderStage contract.
 vec3 applySurfaceFog(vec3 color, float distanceToCamera) {
-#ifdef WORLD_GPU_BACKEND
-    if (renderStage >= 8 && renderStage <= 15) return color;
-#endif
     return applyFog(color, distanceToCamera);
 }
 
@@ -2715,10 +2675,8 @@ vec3 materialPointSpecular(SurfaceMaterial m, vec3 normalView, vec3 viewPosition
     vec3 position = companionPosition(viewPosition, companionOrigin);
     vec3 normal = normalize(mat3(gbufferModelViewInverse) * normalView);
     vec3 view = normalize(mat3(gbufferModelViewInverse) * -viewPosition);
-#ifndef WORLD_GPU_BACKEND
     float size = companionHeader().z;
     float tint = companionVolumeWeight(position, size, 1.0);
-#endif
     int count = int(companionHeader().y + 0.5);
     vec3 sum = vec3(0.0);
     for (int index = 0; index < LOCAL_LIGHT_COUNT; index++) {
@@ -2738,21 +2696,13 @@ vec3 materialPointSpecular(SurfaceMaterial m, vec3 normalView, vec3 viewPosition
         }
         vec4 source = companionLight(index, 1);
         float window = max(1.0 - squared * squared / pow(radius, 4.0), 0.0);
-#ifdef WORLD_GPU_BACKEND
-        WorldPosition receiver = worldPosition(viewToWorld(viewPosition), cameraPosition);
-        vec3 transmission = worldPointGlassFilter(colortex6, index, receiver, normal);
-#else
         vec3 transmission = mix(vec3(1.0), companionTransmission(index, position), tint);
-#endif
         vec3 visibility = companionShadow(index, -ray, radius, normal, transmission);
         vec3 radiance = source.rgb * window * window / (1.0 + squared)
                       * BLOCK_LIGHT_STRENGTH * anchor.w;
         sum += materialLightSpecular(m, normal, view, ray * inversesqrt(squared),
                                      radiance * visibility);
     }
-#ifdef WORLD_GPU_BACKEND
-    sum *= materialAnalyticEmitterWeight(m.roughness);
-#endif
     return sum;
 }
 
@@ -3148,11 +3098,7 @@ vec4 traceVolumetricClouds(vec3 ray, float limit) {
 
 
 vec4 terrainFogHeader(float index) {
-#ifdef WORLD_GPU_BACKEND
-    return worldTerrainHeader(int(index));
-#else
     return texture(companionAtlas, vec2(index + 0.5, 1.5) / companionAtlasSize());
-#endif
 }
 
 bool hasTerrainAtmosphere() {
@@ -3170,14 +3116,10 @@ bool groundFogEnabled() {
 }
 
 vec4 terrainFogCell(vec2 cell, float side) {
-#ifdef WORLD_GPU_BACKEND
-    return worldTerrainColumn(ivec2(cell), 0);
-#else
     vec2 size = companionAtlasSize();
     float index = 2.0 + cell.y * side + cell.x;
     return texture(companionAtlas, vec2(mod(index, size.x) + 0.5,
                      1.5 + floor(index / size.x)) / size);
-#endif
 }
 
 vec4 decodeTerrainFogCell(vec4 cell) {
@@ -3221,22 +3163,9 @@ float terrainMistDensity(vec3 relative, vec4 field, float coverage, vec2 world) 
     if (height < -0.5 || coverage <= 0.0 || field.g <= 0.0 || field.b <= 0.03) {
         return 0.0;
     }
-#ifdef WORLD_GPU_BACKEND
-    WorldPosition point = worldPosition(relative, cameraPosition);
-    ivec2 column = point.block.xz - worldReadOrigin(colortex6, false).xz;
-    vec4 roof = worldGroundColumn(column, 0);
-    vec4 ceiling = worldGroundColumn(column, 1);
-    float worldY = cameraPosition.y + relative.y;
-    if ((roof.a > 0.5 && worldY < roof.r - 0.25)
-        || (ceiling.a > 0.5 && ceiling.r > worldY + 0.1 && ceiling.r - worldY < 32.0)) return 0.0;
-#endif
     float rainFog = weatherRainAmount() * clamp(rainBiome, 0.0, 1.0) * RAIN_FOG_STRENGTH;
     // 只用静态、低对比度的大尺度分布。二维噪声不再随时间平移，避免竖向雾墙摆动。
-#ifdef WORLD_GPU_BACKEND
-    float broad = atmosphereNoise2(world / 125.0, 8.0);
-#else
     float broad = atmosphereNoise2(world / 128.0, 8.0);
-#endif
     float dryLayer = GROUND_FOG_HEIGHT * mix(0.60, 1.25, broad);
     float rainLayer = clamp(GROUND_FOG_HEIGHT * 0.5, 2.0, 6.0);
     float layer = mix(dryLayer, rainLayer, clamp(rainFog, 0.0, 1.0));
@@ -3409,9 +3338,6 @@ uniform sampler2D colortex0;
 uniform sampler2D colortex2;
 uniform sampler2D colortex14;
 uniform sampler2D depthtex0;
-#ifdef WORLD_GPU_BACKEND
-uniform sampler2D colortex9;
-#endif
 #if ENABLE_MATERIAL_REFLECTIONS == 1
 const bool colortex0MipmapEnabled = false;
 #endif
@@ -3424,10 +3350,6 @@ void main() {
     // a blend opacity: a leaf hole containing a wall keeps the wall's coverage.
     float cutout = abs(texture(colortex1, uv).a - MAT_FOLIAGE) < 0.025 ? 2.0 : 0.0;
     vec4 reflectionSource = depth < 0.999999 ? vec4(opaque.rgb, 1.0 + cutout) : vec4(0.0);
-#ifdef WORLD_GPU_BACKEND
-    vec4 base = texture(colortex9, uv);
-    if (depth < 0.999999 && base.a > 0.5) reflectionSource.rgb = base.rgb;
-#endif
     vec3 color = fillSkyBackground(opaque.rgb, uv, depth);
     // 方块只保留漫反射/粗糙Glossy，场景辐射仍单独发布给水面使用。
     bool wetActive = ENABLE_RAIN_PUDDLES == 1 && weatherGroundWetness() * RAIN_PUDDLES_STRENGTH > 0.001;
@@ -3472,27 +3394,17 @@ void main() {
             }
         }
     }
-#if defined(WORLD_GPU_BACKEND) && DEBUG_VIEW == 0
-    if (depth < 0.999999) {
-        color = applyFog(color, length(screenToView(uv, depth)));
-    }
-#endif
     // Glass writes depth. Filling its background afterwards would leave black
     // behind every nonzero-alpha texel, even though clear glass holes look fine.
     fullOut1 = vec4(color, 1.0);
     // 雾色差留到透明物与天气混合后统一修正，避免与 composite2 重复着色。
-#ifndef WORLD_GPU_BACKEND
     // 常规路径的反射源已包含相机雾；同步其天空色，避免雨天倒影保留旧蓝雾。
     // 主画面仍在透明物与雨层合成后独立修正，不重复修改显示颜色。
     if (depth < 0.999999) {
         reflectionSource.rgb = correctSkyFog(reflectionSource.rgb, uv,
             length(screenToView(uv, depth)), 1.0);
     }
-#endif
     fullOut0 = reflectionSource;
-#ifdef WORLD_GPU_BACKEND
-    fullOut5 = vec4(0.0);
-#endif
 #if DEBUG_VIEW == 0
     // 反射已读完不透明 G-Buffer，清出水面参数与独立透明层的存储位置。
     fullOut2 = vec4(0.0);

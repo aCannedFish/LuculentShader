@@ -475,45 +475,8 @@ float cloudProjectedShadowDirect(vec3 world, vec3 lightDirection) {
     return mix(1.0, transmission, CLOUD_SHADOW_STRENGTH);
 }
 
-#ifdef WORLD_GPU_BACKEND
-// No world atlas in the conventional renderer baseline.
-
-#ifndef SIMPLE_WORLD_STORAGE_GLSL
-#define SIMPLE_WORLD_STORAGE_GLSL
-uniform sampler2D colortex6;
-uniform sampler2D noisetex;
-#endif
-
-
-// Points below the cloud layer on one light ray share its optical depth.
-const float CLOUD_SHADOW_CELL = 2.0;
-
-vec2 cloudShadowPlane(vec3 world, vec3 lightDirection) {
-    return world.xz + lightDirection.xz * (cloudAltitudeBounds().x - world.y) / lightDirection.y;
-}
-
-vec2 cloudShadowGridOrigin(vec3 lightDirection) {
-    return floor(cloudShadowPlane(cameraPosition, lightDirection) / CLOUD_SHADOW_CELL) * CLOUD_SHADOW_CELL;
-}
-#endif
 
 float cloudProjectedShadow(vec3 world, vec3 lightDirection) {
-#if defined(WORLD_GPU_BACKEND) && !defined(WORLD_BUILD_CLOUD_SHADOW)
-    vec2 altitude = cloudAltitudeBounds();
-    if (CLOUD_SHADOW_STRENGTH <= 0.0 || lightDirection.y <= 0.04 || world.y >= altitude.y) return 1.0;
-    // Interior-cloud receivers need their remaining partial optical depth.
-    if (world.y < altitude.x) {
-        ivec4 region = worldRegion(WORLD_REGION_CLOUD_SHADOW);
-        vec2 pixel = (cloudShadowPlane(world, lightDirection) - cloudShadowGridOrigin(lightDirection))
-            / CLOUD_SHADOW_CELL + vec2(region.zw) * 0.5;
-        vec2 border = min(pixel, vec2(region.zw) - pixel);
-        if (min(border.x, border.y) >= 1.0) {
-            vec4 cached = textureLod(colortex6,
-                (vec2(region.xy) + pixel) / vec2(textureSize(colortex6, 0)), 0.0);
-            if (cached.w == 1876.0) return cached.x;
-        }
-    }
-#endif
     return cloudProjectedShadowDirect(world, lightDirection);
 }
 
@@ -2599,9 +2562,6 @@ vec3 applyFog(vec3 color, float distanceToCamera) {
 // Deferred applies its camera segment once; later particles/translucency retain
 // their forward fog. Stage values come from the fixed J9 RenderStage contract.
 vec3 applySurfaceFog(vec3 color, float distanceToCamera) {
-#ifdef WORLD_GPU_BACKEND
-    if (renderStage >= 8 && renderStage <= 15) return color;
-#endif
     return applyFog(color, distanceToCamera);
 }
 
@@ -2638,9 +2598,7 @@ vec3 correctSkyFog(vec3 color, vec2 uv, float viewDistance, float backgroundTran
 
 #endif
 
-#ifndef WORLD_GPU_BACKEND
 uniform sampler2D colortex4;
-#endif
 /*
  * 水面光学：固定水底采样、按光程衰减的透射、局部散射与 Fresnel 倒影。
  * 倒影在不透明深度上进行透视正确的 DDA，深度约束滤波模拟粗糙度。
@@ -2660,153 +2618,6 @@ uniform sampler2D colortex4;
 
 
 
-#ifdef WORLD_PACKED_WATER
-/* Water geometry and radiance share one RGBA32F attachment. RGB carries three
- * finite 30-bit words; A remains a normal 0/1 blend mask so glass preserves it.
- * Layout: 12+12 normal bits, 32 depth bits, RGB9E5 radiance and a two-bit tag.
- */
-#ifndef SIMPLE_WORLD_WATER_PACKET_GLSL
-#define SIMPLE_WORLD_WATER_PACKET_GLSL
-#ifndef SIMPLE_WORLD_RAW_PACKING_GLSL
-#define SIMPLE_WORLD_RAW_PACKING_GLSL
-
-// Each word carries 30 bits in a normalized finite float. Exponents 1..128
-// avoid NaNs, infinities and subnormals; RGBA32F stores every bit unchanged.
-float worldRawFloat(uint value) {
-    uint mantissa = value & 0x007fffffu;
-    uint exponent = ((value >> 23u) + 1u) << 23u;
-    return uintBitsToFloat(exponent | mantissa);
-}
-
-uint worldRawUint(float value) {
-    uint word = floatBitsToUint(abs(value));
-    uint exponent = ((word >> 23u) & 255u) - 1u;
-    return (exponent << 23u) | (word & 0x007fffffu);
-}
-
-vec4 worldRawEncode(uvec4 words, bool valid, bool tagged) {
-    if (!valid) return vec4(0.0);
-    vec4 result = vec4(worldRawFloat(words.x), worldRawFloat(words.y),
-        worldRawFloat(words.z), -worldRawFloat(words.w));
-    if (tagged) result.x = -result.x;
-    return result;
-}
-
-bool worldRawValid(vec4 record) {
-    if (record.w >= 0.0) return false;
-    uvec4 words = floatBitsToUint(abs(record));
-    uvec4 exponents = (words >> 23u) & uvec4(255u);
-    return all(greaterThanEqual(exponents, uvec4(1u)))
-        && all(lessThanEqual(exponents, uvec4(128u)));
-}
-
-uvec4 worldRawDecode(vec4 record) {
-    return uvec4(worldRawUint(record.x), worldRawUint(record.y),
-        worldRawUint(record.z), worldRawUint(record.w));
-}
-// Read/write fields across the 30-bit word boundary, including full floats.
-void worldPutRawField(inout uvec4 words, uint value, int first, int bits) {
-    int word = first / 30;
-    int shift = first % 30;
-    value &= bits == 32 ? 0xffffffffu : (1u << uint(bits)) - 1u;
-    words[word] |= (value << uint(shift)) & 0x3fffffffu;
-    if (shift + bits > 30) words[word + 1] |= value >> uint(30 - shift);
-}
-
-uint worldGetRawField(uvec4 words, int first, int bits) {
-    int word = first / 30;
-    int shift = first % 30;
-    uint value = words[word] >> uint(shift);
-    if (shift + bits > 30) value |= words[word + 1] << uint(30 - shift);
-    return value & (bits == 32 ? 0xffffffffu : (1u << uint(bits)) - 1u);
-}
-
-
-#endif
-
-
-struct WaterSurfacePacket {
-    vec2 normal;
-    float depth;
-    vec3 scattering;
-    float coverage;
-};
-
-uint waterRgb9e5(vec3 radiance) {
-    vec3 colour = clamp(radiance, vec3(0.0), vec3(65408.0));
-    float peak = max(colour.r, max(colour.g, colour.b));
-    int exponent = clamp(int(floor(log2(max(peak, 1e-16)))) + 16, 0, 31);
-    float unit = exp2(float(exponent - 24));
-    uvec3 mantissa = uvec3(floor(colour / unit + 0.5));
-    if (max(mantissa.r, max(mantissa.g, mantissa.b)) > 511u && exponent < 31) {
-        exponent++;
-        unit *= 2.0;
-        mantissa = uvec3(floor(colour / unit + 0.5));
-    }
-    mantissa = min(mantissa, uvec3(511u));
-    return mantissa.r | (mantissa.g << 9u) | (mantissa.b << 18u) | (uint(exponent) << 27u);
-}
-
-vec3 waterRgb9e5Value(uint value) {
-    uvec3 mantissa = uvec3(value, value >> 9u, value >> 18u) & uvec3(511u);
-    return vec3(mantissa) * exp2(float(int(value >> 27u) - 24));
-}
-
-vec4 packWaterSurface(vec2 normal, float depth, vec3 scattering) {
-    uvec4 words = uvec4(0u);
-    uvec2 encoded = uvec2(round(clamp(normal, 0.0, 1.0) * 4095.0));
-    worldPutRawField(words, encoded.x, 0, 12);
-    worldPutRawField(words, encoded.y, 12, 12);
-    worldPutRawField(words, floatBitsToUint(depth), 24, 32);
-    worldPutRawField(words, waterRgb9e5(scattering), 56, 32);
-    worldPutRawField(words, 2u, 88, 2);
-    return vec4(worldRawFloat(words.x), worldRawFloat(words.y), worldRawFloat(words.z), 1.0);
-}
-
-WaterSurfacePacket unpackWaterSurface(vec4 packedValue) {
-    WaterSurfacePacket result = WaterSurfacePacket(vec2(0.5), 0.0, vec3(0.0), 0.0);
-    if (packedValue.a < 0.5) return result;
-    uvec4 words = uvec4(worldRawUint(packedValue.x), worldRawUint(packedValue.y),
-        worldRawUint(packedValue.z), 0u);
-    if (worldGetRawField(words, 88, 2) != 2u) return result;
-    result.normal = vec2(worldGetRawField(words, 0, 12), worldGetRawField(words, 12, 12)) / 4095.0;
-    result.depth = uintBitsToFloat(worldGetRawField(words, 24, 32));
-    result.scattering = waterRgb9e5Value(worldGetRawField(words, 56, 32));
-    result.coverage = 1.0;
-    return result;
-}
-
-WaterSurfacePacket readWaterPacket(sampler2D geometry, vec2 uv) {
-    ivec2 size = textureSize(geometry, 0);
-    vec2 coordinate = uv * vec2(size) - 0.5;
-    ivec2 nearest = clamp(ivec2(floor(uv * vec2(size))), ivec2(0), size - 1);
-    if (all(lessThan(abs(coordinate - round(coordinate)), vec2(0.0002)))) {
-        return unpackWaterSurface(texelFetch(geometry, nearest, 0));
-    }
-    ivec2 first = ivec2(floor(coordinate));
-    vec2 fraction = fract(coordinate);
-    WaterSurfacePacket sum = WaterSurfacePacket(vec2(0.0), 0.0, vec3(0.0), 0.0);
-    for (int x = 0; x < 2; x++) {
-        for (int y = 0; y < 2; y++) {
-            ivec2 pixel = clamp(first + ivec2(x, y), ivec2(0), size - 1);
-            WaterSurfacePacket value = unpackWaterSurface(texelFetch(geometry, pixel, 0));
-            float weight = (x == 0 ? 1.0 - fraction.x : fraction.x)
-                * (y == 0 ? 1.0 - fraction.y : fraction.y) * value.coverage;
-            sum.normal += value.normal * weight;
-            sum.depth += value.depth * weight;
-            sum.scattering += value.scattering * weight;
-            sum.coverage += weight;
-        }
-    }
-    if (sum.coverage < 0.5) return WaterSurfacePacket(vec2(0.5), 0.0, vec3(0.0), 0.0);
-    sum.normal /= sum.coverage;
-    sum.depth /= sum.coverage;
-    sum.scattering /= sum.coverage;
-    return sum;
-}
-#endif
-
-#endif
 
 
 // block.properties 将水映射到此 ID，避免玻璃也产生波浪。
@@ -2837,26 +2648,16 @@ bool validWaterMediumHistory(vec4 history) {
 // 水面几何与参数各自以 alpha=1 标记有效片元，玻璃以 alpha=0 保留这些数据。
 // 返回既有逻辑使用的布局：八面体法线 RG、天空可见度 B、线性视图深度 A。
 vec4 readWaterSurface(sampler2D geometry, sampler2D parameters, vec2 uv) {
-#ifdef WORLD_PACKED_WATER
-    WaterSurfacePacket packedSurface = readWaterPacket(geometry, uv);
-    if (packedSurface.coverage < 0.5) return vec4(0.0);
-    return vec4(packedSurface.normal, texture(parameters, uv).r, packedSurface.depth);
-#else
     vec4 surface = texture(geometry, uv);
     if (surface.a < 0.5) {
         return vec4(0.0);
     }
     float sky = texture(parameters, uv).r;
     return vec4(surface.rg, sky, surface.b);
-#endif
 }
 
 vec3 readWaterScattering(sampler2D geometry, sampler2D scattering, vec2 uv) {
-#ifdef WORLD_PACKED_WATER
-    return readWaterPacket(geometry, uv).scattering;
-#else
     return texture(scattering, uv).rgb;
-#endif
 }
 
 // 从透明水面附件的线性深度恢复位置，供水面合成与水深估计共用。
@@ -2897,11 +2698,7 @@ vec3 decodeWaterNormal(vec2 encoded) {
 // 缺少新元数据时退回屏幕探针，仍只接受水平水面并平均水深。
 vec2 estimateWaterMedium(sampler2D surfaces, sampler2D parameters) {
     if (hasCompanionLighting()) {
-#ifdef WORLD_GPU_BACKEND
-        vec4 medium = worldCameraWaterMedium();
-#else
         vec4 medium = texture(companionAtlas, vec2(0.5, 7.5) / companionAtlasSize());
-#endif
         if (abs(medium.w - 1573.0) < 0.5 && medium.z > 0.5) {
             return medium.xy;
         }
@@ -3484,16 +3281,8 @@ vec4 traceAdaptiveReflection(sampler2D scene, sampler2D depths, vec3 origin, vec
 #ifndef LIB_REFLECTION_SOURCE_GLSL
 #define LIB_REFLECTION_SOURCE_GLSL
 
-#ifdef WORLD_GPU_BACKEND
-ivec2 reflectionSourceTexel(sampler2D field, vec2 uv) {
-    vec2 size = vec2(textureSize(field, 0));
-    return ivec2(clamp(floor(uv * size), vec2(0.0), size - 1.0));
-}
-#define reflectionSourceRead(field, uv) texelFetch(field, reflectionSourceTexel(field, uv), 0)
-#else
 // The GLSL 120 path has no colour mip chain; exact centres still read level 0.
 #define reflectionSourceRead(field, uv) texture(field, uv)
-#endif
 
 vec2 reflectionSourcePixel(vec2 uv) {
     vec2 size = vec2(viewWidth, viewHeight);
@@ -3589,19 +3378,7 @@ vec4 reflectionSourceFiltered(sampler2D scene, sampler2D depths, vec2 uv,
 
 
 vec3 reflectionAirMedium(vec3 radiance, float distance, vec3 viewDirection) {
-#ifdef WORLD_GPU_BACKEND
-    if (isEyeInWater != 0) return radiance;
-    float opacity = getFogFactor(distance);
-    if (opacity <= 0.0) return radiance;
-    vec3 colour = getFogColor();
-#if SIMPLE_DIMENSION == 0
-    vec3 direction = normalize(mat3(gbufferModelViewInverse) * viewDirection);
-    colour = skyAtmosphereRadiance(direction);
-#endif
-    return mix(radiance, colour, opacity);
-#else
     return radiance;
-#endif
 }
 #endif
 
@@ -4607,102 +4384,6 @@ uniform sampler2D colortex7;
 uniform sampler2D depthtex0;
 uniform sampler2D colortex1;
 uniform sampler2D colortex2;
-#ifdef WORLD_BASE_OPTICS
-uniform sampler2D colortex3;
-#endif
-#ifdef WORLD_REFLECTION_CACHE
-/* Water reflection history is independent of display colour and air fog.
- * Finite-word storage preserves HDR, receiver depth and identity in one target.
- * Every read decodes first; packed values must never use hardware interpolation.
- */
-#ifndef SIMPLE_WORLD_REFLECTION_HISTORY_GLSL
-#define SIMPLE_WORLD_REFLECTION_HISTORY_GLSL
-
-
-
-struct WorldReflectionHistory {
-    vec3 radiance;
-    vec3 normal;
-    float depth;
-    float confidence;
-    int frame;
-    int count;
-    bool valid;
-};
-
-WorldReflectionHistory worldEmptyReflection() {
-    return WorldReflectionHistory(vec3(0.0), vec3(0.0, 1.0, 0.0), 0.0, 0.0, -1, 0, false);
-}
-
-vec4 worldPackReflection(WorldReflectionHistory value) {
-    if (!value.valid) return vec4(0.0);
-    uvec4 words = uvec4(0u);
-    uvec2 normal = uvec2(round(encodeWaterNormal(value.normal) * 4095.0));
-    worldPutRawField(words, waterRgb9e5(value.radiance), 0, 32);
-    worldPutRawField(words, normal.x, 32, 12);
-    worldPutRawField(words, normal.y, 44, 12);
-    worldPutRawField(words, floatBitsToUint(value.depth), 56, 32);
-    worldPutRawField(words, uint(value.frame), 88, 20);
-    worldPutRawField(words, uint(value.count), 108, 5);
-    worldPutRawField(words, uint(round(clamp(value.confidence, 0.0, 1.0) * 15.0)), 113, 4);
-    worldPutRawField(words, 5u, 117, 3);
-    return worldRawEncode(words, true, false);
-}
-
-WorldReflectionHistory worldUnpackReflection(vec4 packedValue) {
-    WorldReflectionHistory result = worldEmptyReflection();
-    if (!worldRawValid(packedValue)) return result;
-    uvec4 words = worldRawDecode(packedValue);
-    if (worldGetRawField(words, 117, 3) != 5u) return result;
-    result.radiance = waterRgb9e5Value(worldGetRawField(words, 0, 32));
-    result.normal = decodeWaterNormal(vec2(worldGetRawField(words, 32, 12),
-        worldGetRawField(words, 44, 12)) / 4095.0);
-    result.depth = uintBitsToFloat(worldGetRawField(words, 56, 32));
-    result.frame = int(worldGetRawField(words, 88, 20));
-    result.count = int(worldGetRawField(words, 108, 5));
-    result.confidence = float(worldGetRawField(words, 113, 4)) / 15.0;
-    result.valid = result.depth > 0.0;
-    return result;
-}
-
-WorldReflectionHistory worldReflectionHistoryAt(ivec2 pixel) {
-    ivec2 size = textureSize(colortex7, 0);
-    return worldUnpackReflection(texelFetch(colortex7, clamp(pixel, ivec2(0), size - 1), 0));
-}
-
-// Reconstruct only samples on this water plane, with compatible wave normals.
-// Thin water/shore contacts that have no valid neighbours use a full query.
-vec4 worldWaterReflectionAt(vec2 uv, vec3 position, vec3 normal) {
-    ivec2 size = textureSize(colortex7, 0);
-    vec2 coordinate = uv * vec2(size) - 0.5;
-    ivec2 first = ivec2(floor(coordinate));
-    vec2 fraction = fract(coordinate);
-    vec3 normalWorld = normalize(mat3(gbufferModelViewInverse) * normal);
-    float height = viewToWorld(position).y;
-    vec3 sum = vec3(0.0);
-    float total = 0.0;
-    for (int x = 0; x < 2; x++) {
-        for (int y = 0; y < 2; y++) {
-            ivec2 pixel = clamp(first + ivec2(x, y), ivec2(0), size - 1);
-            WorldReflectionHistory value = worldReflectionHistoryAt(pixel);
-            if (!value.valid || value.frame != frameCounter) continue;
-            vec2 sampleUv = (vec2(pixel) + 0.5) / vec2(size);
-            vec3 point = waterSurfacePosition(sampleUv, value.depth);
-            float heightError = abs(viewToWorld(point).y - height);
-            float agreement = dot(normalWorld, value.normal);
-            if (heightError > 0.08 || agreement < 0.94) continue;
-            float spatial = (x == 0 ? 1.0 - fraction.x : fraction.x)
-                * (y == 0 ? 1.0 - fraction.y : fraction.y);
-            float weight = spatial * exp(-heightError * 20.0) * pow(agreement, 24.0);
-            sum += value.radiance * weight;
-            total += weight;
-        }
-    }
-    return total > 0.05 ? vec4(sum / total, 1.0) : vec4(0.0);
-}
-#endif
-
-#endif
 
 // Colour reconstruction validates each mip-zero texel against the hit plane.
 vec4 filteredWaterReflection(vec2 uv, float distanceToHit, float hitDepth, float roughness) {
@@ -4845,13 +4526,8 @@ vec3 applyWaterReflection(vec3 color, vec2 uv, float normalVariance) {
     float verticalDepth = max(originWorld.y - opaqueWorld.y, 0.0);
     float waterDistance = bedHit.distance >= 0.0 ? bedHit.distance : 48.0;
     waterDistance = clamp(waterDistance, 0.0, 48.0);
-#ifdef WORLD_BASE_OPTICS
-    vec3 transmitted = applyTransparentLayer(waterTransmissionColor(colortex3, depthtex1,
-        transmittedUv, opaqueWorld, receiverNormal, originWorld.y), backgroundLayer);
-#else
     vec3 transmitted = applyTransparentLayer(waterTransmissionColor(colortex6, depthtex1,
         transmittedUv, opaqueWorld, receiverNormal, originWorld.y), backgroundLayer);
-#endif
     if (alternateBed.a > 0.0) {
         waterDistance = alternateDistance;
         opaqueWorld = viewToAbsoluteWorld(position + ray * alternateDistance);
@@ -4888,11 +4564,6 @@ vec3 applyWaterReflection(vec3 color, vec2 uv, float normalVariance) {
     if (dot(reflectionNormal, -incident) <= 0.0) weight = 0.0;
     if (weight > 0.001) {
         vec4 radiance = vec4(0.0);
-#if defined(WORLD_REFLECTION_CACHE) && !defined(WORLD_REFLECTION_CACHE_WRITE)
-        if (waterDistance >= 1.0) {
-            radiance = worldWaterReflectionAt(uv, position, reflectionNormal);
-        }
-#endif
         if (radiance.a <= 0.0) {
             radiance = queryWaterRadiance(position, direction, roughness, surface.b);
         }
@@ -5039,29 +4710,18 @@ vec3 waterSurfaceNormal(vec2 position, float time, float footprint) {
 #endif
 
 
-#ifndef WORLD_GPU_BACKEND
 uniform sampler2D colortex15;
 uniform sampler2D depthtex2;
-#endif
 SIMPLE_VARYING vec3 vUnderwaterTint;
 SIMPLE_VARYING vec3 vUnderwaterScatter;
-#ifdef WORLD_BASE_OPTICS
-SIMPLE_VARYING float vUnderwaterDepth;
-#define underwaterOpaqueSource colortex3
-#else
 #define underwaterOpaqueSource colortex6
-#endif
 
 /* Reconstruct the reduced underwater shaft field using optical path depth.
  * The first texel is frame metadata and never contributes shaft radiance. */
 #ifndef LIB_WATER_SHAFTS_FILTER_GLSL
 #define LIB_WATER_SHAFTS_FILTER_GLSL
 float estimateUnderwaterDepth() {
-#ifdef WORLD_BASE_OPTICS
-    return vUnderwaterDepth;
-#else
     return texture(colortex4, vec2(0.5) / vec2(viewWidth, viewHeight)).a;
-#endif
 }
 
 // alpha 保存积分终点，拒绝跨越近处遮挡物的散射，首个元数据纹素不参与重建。
@@ -5098,19 +4758,11 @@ vec3 sampleWaterShafts(vec2 uv, float pathLength) {
 
 // OptiFine在手持模型之前复制depthtex2；配对附件只含实际场景，正常手部不变。
 float underwaterExitDepth(vec2 uv) {
-#ifndef WORLD_GPU_BACKEND
     return texture(depthtex2, uv).r;
-#else
-    return texture(depthtex1, uv).r;
-#endif
 }
 
 vec3 underwaterExitOpaqueColor(vec2 uv) {
-#ifndef WORLD_GPU_BACKEND
     return texture(colortex15, uv).rgb;
-#else
-    return texture(underwaterOpaqueSource, uv).rgb;
-#endif
 }
 
 // 判断偏移坐标是否仍在水上景物中，只拒绝水下前景，不锁死水上物体轮廓。
@@ -5288,9 +4940,7 @@ vec3 applyUnderwaterOptics(vec2 uv, float sceneDepth) {
             cameraPosition.y + eyeDepth, skyVisibility);
     }
     vec3 result = applyUnderwaterVolume(radiance, path, vUnderwaterTint, vUnderwaterScatter);
-#ifndef WORLD_BASE_OPTICS
     result += sampleWaterShafts(uv, path);
-#endif
     return result;
 }
 
@@ -5482,11 +5132,7 @@ vec4 integrateAirScattering(vec2 uv, float sceneDistance, float densityModulatio
 
 
 vec4 terrainFogHeader(float index) {
-#ifdef WORLD_GPU_BACKEND
-    return worldTerrainHeader(int(index));
-#else
     return texture(companionAtlas, vec2(index + 0.5, 1.5) / companionAtlasSize());
-#endif
 }
 
 bool hasTerrainAtmosphere() {
@@ -5504,14 +5150,10 @@ bool groundFogEnabled() {
 }
 
 vec4 terrainFogCell(vec2 cell, float side) {
-#ifdef WORLD_GPU_BACKEND
-    return worldTerrainColumn(ivec2(cell), 0);
-#else
     vec2 size = companionAtlasSize();
     float index = 2.0 + cell.y * side + cell.x;
     return texture(companionAtlas, vec2(mod(index, size.x) + 0.5,
                      1.5 + floor(index / size.x)) / size);
-#endif
 }
 
 vec4 decodeTerrainFogCell(vec4 cell) {
@@ -5555,22 +5197,9 @@ float terrainMistDensity(vec3 relative, vec4 field, float coverage, vec2 world) 
     if (height < -0.5 || coverage <= 0.0 || field.g <= 0.0 || field.b <= 0.03) {
         return 0.0;
     }
-#ifdef WORLD_GPU_BACKEND
-    WorldPosition point = worldPosition(relative, cameraPosition);
-    ivec2 column = point.block.xz - worldReadOrigin(colortex6, false).xz;
-    vec4 roof = worldGroundColumn(column, 0);
-    vec4 ceiling = worldGroundColumn(column, 1);
-    float worldY = cameraPosition.y + relative.y;
-    if ((roof.a > 0.5 && worldY < roof.r - 0.25)
-        || (ceiling.a > 0.5 && ceiling.r > worldY + 0.1 && ceiling.r - worldY < 32.0)) return 0.0;
-#endif
     float rainFog = weatherRainAmount() * clamp(rainBiome, 0.0, 1.0) * RAIN_FOG_STRENGTH;
     // 只用静态、低对比度的大尺度分布。二维噪声不再随时间平移，避免竖向雾墙摆动。
-#ifdef WORLD_GPU_BACKEND
-    float broad = atmosphereNoise2(world / 125.0, 8.0);
-#else
     float broad = atmosphereNoise2(world / 128.0, 8.0);
-#endif
     float dryLayer = GROUND_FOG_HEIGHT * mix(0.60, 1.25, broad);
     float rainLayer = clamp(GROUND_FOG_HEIGHT * 0.5, 2.0, 6.0);
     float layer = mix(dryLayer, rainLayer, clamp(rainFog, 0.0, 1.0));
@@ -5809,7 +5438,6 @@ void main() {
         // 雨丝自身按距离淡出，雾色差只修正仍可见的背景，避免远处雨丝发黄。
         color = correctSkyFog(color, screenCoord, sceneDistance, backgroundTransmission);
     }
-#ifndef WORLD_BASE_OPTICS
     // Glass transmits the medium behind it. Opaque depth guides all air fields;
     // the explicit water interface still clips them at the air/water boundary.
     float opaqueDepth = texture(depthtex1, screenCoord).r;
@@ -5820,7 +5448,6 @@ void main() {
     }
     vec4 cloud = upsampleClouds(screenCoord, volumeDistance);
     color = cloud.rgb + color * (1.0 - cloud.a);
-#endif
 #if DEBUG_VIEW == 0
     // 天气只在近处光学处理完成后叠加一次，云背景与无云背景使用同一雨层。
     color = applyRainOverlay(color, texture(colortex1, screenCoord), waterDepth > 0.001);
