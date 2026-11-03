@@ -78,8 +78,8 @@ vec3 waterExitRadiance(vec2 uv, vec3 interfaceView, vec3 airDirection,
         vec4 cloud = cloudEnvironment(airDirection);
         radiance = cloud.rgb + skyRadiance(airDirection) * (1.0 - cloud.a);
     }
-    if (layer.distance > 0.0 && (distance < 0.0 || layer.distance < distance)) {
-        vec4 colour = texelFetch(colortex2, ivec2(layer.uv * vec2(viewWidth, viewHeight)), 0);
+    {
+        vec4 colour = waterExitLayers(interfaceView, ray, distance > 0.0 ? distance : far, layer);
         radiance = applyTransparentLayer(radiance, colour);
     }
     return radiance;

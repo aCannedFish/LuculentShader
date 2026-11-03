@@ -84,6 +84,7 @@ vec3 waterLightFace(WaterFaceHit hit, vec3 normal, vec3 hitView) {
 bool waterReadFace(int face, vec2 f, vec3 hitView, out WaterFaceHit material) {
     uint a = imageLoad(colorimg5, waterFaceAddress(face, 2)).r;
     uint b = imageLoad(colorimg5, waterFaceAddress(face, 3)).r;
+    if (((a | b) & waterGlassMask) != 0u) return false;
     if ((a & 31u) != 15u || (b != 0u && (b & 31u) != 15u)) return false;
     material = WaterFaceHit(face, 0, f);
     int firstPriority = max(findMSB(a >> 8u), 0);
@@ -136,8 +137,22 @@ bool waterColumnGap(uint mask, int y, int stepY, out int edge) {
 
 // Consult only certified faces actually submitted this frame. Cell traversal
 // locates their boundary planes; it never interprets occupancy as a surface.
-bool waterNearFaceHit(vec3 position, vec3 direction, float limit, out float distance,
-                      out vec3 normal, out WaterFaceHit material) {
+struct WaterLayers {
+    vec4 colour;
+    vec4 screenColour;
+    float screenDistance;
+};
+
+void appendWaterLayer(inout vec4 foreground, vec4 background) {
+    foreground += (1.0 - foreground.a) * background;
+}
+
+#ifdef WATER_NATIVE_GLASS
+vec4 waterGlassRadiance(WaterFaceHit hit, vec3 normalWorld, vec3 hitView, vec3 view);
+#endif
+
+bool waterTraceFaces(vec3 position, vec3 direction, float limit, out float distance,
+                     out vec3 normal, out WaterFaceHit material, bool glassOnly, inout WaterLayers layers) {
     distance = -1.0;
     if (!waterFacesReady() || limit <= 0.0) return false;
     vec3 relativeOrigin = viewToWorld(position);
@@ -168,7 +183,8 @@ bool waterNearFaceHit(vec3 position, vec3 direction, float limit, out float dist
         ivec3 span = ivec3(1);
         int large = waterColumnIndex(cell, 16);
         if (large != previousLarge) {
-            largeColumn = imageLoad(colorimg5, waterColumnAddress(large)).r;
+            largeColumn = imageLoad(colorimg5, glassOnly ? waterGlassColumn(large - 1024)
+                                                          : waterColumnAddress(large)).r;
             previousLarge = large;
         }
         int edgeY = 0;
@@ -226,7 +242,7 @@ bool waterNearFaceHit(vec3 position, vec3 direction, float limit, out float dist
         }
         if (((mask >> uint(6 * (cell.y & 3))) & facing[axis]) == 0u) continue;
         ivec3 owner = cell + grid;
-        int face = waterFindFace(owner, axis, stepDir[axis] > 0, false);
+        int face = waterFindFace(owner, axis, stepDir[axis] > 0, false, glassOnly);
         if (face < 0) continue;
         // Reconstruct the final distance against the actual integer plane in
         // camera-relative space. The traversal grid has up to 128 cells, so
@@ -238,10 +254,33 @@ bool waterNearFaceHit(vec3 position, vec3 direction, float limit, out float dist
         normal[axis] = -float(stepDir[axis]);
         vec3 localHit = fma(ray, vec3(hitDistance), relativeOrigin + (cameraPosition - vec3(owner)));
         vec2 f = clamp(waterFaceAxes(localHit, axis), 0.0, 1.0);
+#ifdef WATER_NATIVE_GLASS
+        if (glassOnly) {
+            if (imageLoad(colorimg5, waterFaceAddress(face, 2)).r != waterGlassMask
+                || imageLoad(colorimg5, waterFaceAddress(face, 3)).r != 0u) continue;
+            // Prefer the recorded material at a matched plane. A separate
+            // camera-only layer (a pane or an oblique model) keeps its depth order.
+            if (layers.screenDistance > 0.0 && layers.screenDistance <= hitDistance + 0.008) {
+                if (layers.screenDistance < hitDistance - 0.008) appendWaterLayer(layers.colour, layers.screenColour);
+                layers.screenDistance = -1.0;
+            }
+            vec4 colour = waterGlassRadiance(WaterFaceHit(face, 0, f), normal,
+                position + direction * hitDistance, -direction);
+            appendWaterLayer(layers.colour, colour);
+            if (layers.colour.a >= 0.9999) break;
+            continue;
+        }
+#endif
         if (waterReadFace(face, f, position + direction * hitDistance, material)) {
             distance = hitDistance;
             return true;
         }
     }
     return false;
+}
+
+bool waterNearFaceHit(vec3 position, vec3 direction, float limit, out float distance,
+                      out vec3 normal, out WaterFaceHit material) {
+    WaterLayers unused;
+    return waterTraceFaces(position, direction, limit, distance, normal, material, false, unused);
 }

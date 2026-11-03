@@ -20,9 +20,16 @@ const ivec3 workGroups = ivec3(640, 1, 1);
 void main() {
 #if SIMPLE_DIMENSION == 0 && ENABLE_SHADOWS == 1
     int face = int(gl_GlobalInvocationID.x);
+    if (face < 64) imageStore(colorimg5, waterGlassColumn(face), uvec4(0u));
+    if (face < 3) imageStore(colorimg5, ivec2(18 + face, imageSize(colorimg5).y - 1), uvec4(0u));
     if (face < waterColumnCount) imageStore(colorimg5, waterColumnAddress(face), uvec4(0));
     if (face < waterMacroCount) imageStore(colorimg5, waterMacroAddress(face), uvec4(0u));
     if (face < waterFarSlots) imageStore(colorimg5, waterKeyAddress(face), uvec4(0u));
+    if (isEyeInWater == 1 && face < waterGlassSlots) {
+        int record = waterTotalFaces + face;
+        imageStore(colorimg5, waterGlassKeyAddress(face), uvec4(0u));
+        for (int word = 0; word < 4; ++word) imageStore(colorimg5, waterFaceAddress(record, word), uvec4(0u));
+    }
     if (face < waterTotalFaces) {
         for (int word = 0; word < 4; ++word) imageStore(colorimg5, waterFaceAddress(face, word), uvec4(0u));
     }

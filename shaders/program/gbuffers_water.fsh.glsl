@@ -3201,93 +3201,15 @@ vec3 materialDirectSpecular(SurfaceMaterial m, vec3 normal, vec3 viewPosition,
 /* LabPBR 1.3通用通道解码。不识别方块名称、矿石颜色或特定资源包。
  * specular与normal是线性数据贴图；albedo由调用者预先转为线性颜色。
  */
-#ifndef LIB_LABPBR_GLSL
-#define LIB_LABPBR_GLSL
-
-struct LabPbrMaterial {
-    vec3 albedo;
-    vec3 f0;
-    float roughness;
-    float metallic;
-    float emission;
-    float porosity;
-    float subsurface;
-    vec3 tangentNormal;
-    float ao;
-    float height;
-};
-
-// 标准预定义金属的光学常数，不是按游戏方块分类的材质表。
-vec3 labPbrConductorF0(int code, vec3 albedo) {
-    vec3 n;
-    vec3 k;
-    if (code == 230) {
-        n = vec3(2.9114, 2.9497, 2.5845);
-        k = vec3(3.0893, 2.9318, 2.7670);
-    }
-    else if (code == 231) {
-        n = vec3(0.18299, 0.42108, 1.3734);
-        k = vec3(3.4242, 2.3459, 1.7704);
-    }
-    else if (code == 232) {
-        n = vec3(1.3456, 0.96521, 0.61722);
-        k = vec3(7.4746, 6.3995, 5.3031);
-    }
-    else if (code == 233) {
-        n = vec3(3.1071, 3.1812, 2.3230);
-        k = vec3(3.3314, 3.3291, 3.1350);
-    }
-    else if (code == 234) {
-        n = vec3(0.27105, 0.67693, 1.3164);
-        k = vec3(3.6092, 2.6248, 2.2921);
-    }
-    else if (code == 235) {
-        n = vec3(1.9100, 1.8300, 1.4400);
-        k = vec3(3.5100, 3.4000, 3.1800);
-    }
-    else if (code == 236) {
-        n = vec3(2.3757, 2.0847, 1.8453);
-        k = vec3(4.2655, 3.7153, 3.1365);
-    }
-    else if (code == 237) {
-        n = vec3(0.15943, 0.14512, 0.13547);
-        k = vec3(3.9291, 3.1900, 2.3808);
-    }
-    else {
-        return clamp(albedo, 0.0, 1.0);
-    }
-    vec3 numerator = (n - 1.0) * (n - 1.0) + k * k;
-    vec3 denominator = (n + 1.0) * (n + 1.0) + k * k;
-    return numerator / denominator * clamp(albedo, 0.0, 1.0);
-}
-
-LabPbrMaterial decodeLabPbr(vec3 albedo, vec4 specularMap, vec4 normalMap) {
-    LabPbrMaterial m;
-    m.albedo = max(albedo, vec3(0.0));
-    m.roughness = (1.0 - specularMap.r) * (1.0 - specularMap.r);
-    int reflectance = int(floor(specularMap.g * 255.0 + 0.5));
-    m.metallic = reflectance >= 230 ? 1.0 : 0.0;
-    m.f0 = reflectance >= 230 ? labPbrConductorF0(reflectance, m.albedo) : vec3(specularMap.g);
-    int blue = int(floor(specularMap.b * 255.0 + 0.5));
-    m.porosity = reflectance < 230 && blue <= 64 ? float(blue) / 64.0 : 0.0;
-    m.subsurface = reflectance < 230 && blue >= 65 ? float(blue - 65) / 190.0 : 0.0;
-    int emissive = int(floor(specularMap.a * 255.0 + 0.5));
-    m.emission = emissive < 255 ? float(emissive) / 254.0 : 0.0;
-    // XY采用纹理坐标正方向的DirectX约定，切线基的bitangent须指向纹理V增大方向。
-    vec2 xy = normalMap.rg * 2.0 - 1.0;
-    float z = sqrt(max(1.0 - dot(xy, xy), 0.0));
-    m.tangentNormal = normalize(vec3(xy, z));
-    m.ao = clamp(normalMap.b, 0.0, 1.0);
-    m.height = clamp(normalMap.a, 0.0, 1.0);
-    return m;
-}
-#endif
+#include "/lib/labpbr_decode.glsl"
 
 
 uniform sampler2D normals;
 uniform sampler2D specular;
 
 // 高度数据的POM只在有效原生图集范围内步进。平坦高度直接退出，演示包没有额外成本。
+#include "/lib/pbr_height.glsl"
+
 vec2 pbrParallaxUv(vec2 uv, vec3 position, vec3 geometric, vec4 tile) {
 #if POM_QUALITY == 0
     return uv;
@@ -3305,36 +3227,7 @@ vec2 pbrParallaxUv(vec2 uv, vec3 position, vec3 geometric, vec4 tile) {
     bitangent = safeNormalize(bitangent * sign(determinant), cross(geometric, tangent));
     vec3 view = safeNormalize(-position, geometric);
     vec3 viewTangent = vec3(dot(view, tangent), dot(view, bitangent), dot(view, geometric));
-    if (viewTangent.z <= 0.08) return uv;
-    float initialDepth = 1.0 - texture(normals, uv).a;
-    if (initialDepth < 0.5 / 255.0) return uv;
-#if POM_QUALITY == 1
-    const int steps = 8;
-#elif POM_QUALITY == 2
-    const int steps = 16;
-#else
-    const int steps = 24;
-#endif
-    vec2 pixel = 0.5 / vec2(textureSize(normals, 0));
-    vec2 minimum = tile.xy - tile.zw + pixel;
-    vec2 maximum = tile.xy + tile.zw - pixel;
-    vec2 direction = viewTangent.xy / viewTangent.z * tile.zw * 0.5;
-    vec2 current = uv;
-    vec2 previous = uv;
-    float previousDifference = -initialDepth;
-    float difference = previousDifference;
-    for (int index = 1; index <= steps; index++) {
-        float depth = float(index) / float(steps);
-        vec2 candidate = uv - direction * depth;
-        if (any(lessThan(candidate, minimum)) || any(greaterThan(candidate, maximum))) return current;
-        previous = current;
-        previousDifference = difference;
-        current = candidate;
-        difference = depth - (1.0 - texture(normals, current).a);
-        if (difference >= 0.0) break;
-    }
-    float weight = clamp(difference / max(difference - previousDifference, 0.00001), 0.0, 1.0);
-    return mix(current, previous, weight);
+    return pbrHeightUv(normals, uv, viewTangent, tile, du, dv);
 #endif
 }
 
@@ -3361,14 +3254,7 @@ vec3 pbrSurfaceNormal(vec3 geometric, vec3 position, vec2 uv, vec3 tangentNormal
     return safeNormalize(mat3(tangent, bitangent, geometric) * tangentNormal, geometric);
 }
 
-SurfaceMaterial pbrBrdfMaterial(LabPbrMaterial pbr) {
-    SurfaceMaterial m;
-    m.f0 = pbr.f0;
-    // 现有GGX内部将感知粗糙度平方为分布alpha，避免对LabPBR值重复平方。
-    m.roughness = max(sqrt(max(pbr.roughness, 0.0)), MATERIAL_GLOSS_ROUGHNESS);
-    m.metallic = pbr.metallic;
-    return m;
-}
+
 
 vec3 pbrGlossTangent(vec3 normal, vec3 position, vec2 uv) {
     vec3 tangent = dFdx(position) * dFdy(uv).y - dFdy(position) * dFdx(uv).y;
@@ -3378,72 +3264,12 @@ vec3 pbrGlossTangent(vec3 normal, vec3 position, vec2 uv) {
 }
 
 // 现有原生光源候选与逐灯透射缓存提供局部高光，完全不查询反射场景。
-vec3 pbrLocalGloss(SurfaceMaterial m, vec3 normalView, vec3 tangentView, vec3 position, float anisotropy) {
-#if defined(SIMPLE_VARYING) && (ENABLE_COLOURED_LIGHTING == 1 || GI_QUALITY > 0)
-    if (!lpvHeaderValid(texelFetch(colortex8, ivec2(0), 0))) return vec3(0.0);
-    vec3 normal = normalize(mat3(gbufferModelViewInverse) * normalView);
-    vec3 tangent = normalize(mat3(gbufferModelViewInverse) * tangentView);
-    vec3 view = normalize(mat3(gbufferModelViewInverse) * -position);
-    vec3 world = viewToAbsoluteWorld(position) + normal * 0.04;
-    vec3 receiver = world - vec3(lpvOrigin(cameraPosition));
-    vec3 axis = abs(normal);
-    vec3 plane = axis.x >= axis.y && axis.x >= axis.z ? vec3(0.0, 1.0, 1.0)
-        : axis.y >= axis.z ? vec3(1.0, 0.0, 1.0) : vec3(1.0, 1.0, 0.0);
-    vec3 first = plane.x > 0.5 ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 1.0, 0.0);
-    vec3 second = plane.z > 0.5 ? vec3(0.0, 0.0, 1.0) : vec3(0.0, 1.0, 0.0);
-    vec3 shifted = receiver - plane * 0.5;
-    ivec3 base = ivec3(floor(shifted));
-    vec2 fraction = vec2(dot(fract(shifted), first), dot(fract(shifted), second));
-    vec3 sum = vec3(0.0);
-    for (int x = 0; x < 2; x++) {
-        for (int y = 0; y < 2; y++) {
-            ivec3 cell = base + ivec3(first) * x + ivec3(second) * y;
-            if (!lpvInside(cell)) continue;
-            float weight = (x == 0 ? 1.0 - fraction.x : fraction.x)
-                * (y == 0 ? 1.0 - fraction.y : fraction.y);
-            ivec2 address = lpvAddress(cell);
-            vec3 candidates = texelFetch(colortex10, address, 0).rgb;
-            for (int entry = 0; entry < 3; entry++) {
-                int identity = int(round(candidates[entry])) - 1;
-                if (identity < 0) continue;
-                ivec3 source = lpvCell(identity);
-                uint material = lpvVoxel(source);
-                if (lpvKind(material) != LPV_EMITTER) continue;
-                vec3 ray = vec3(source) + vec3(0.5, 0.72, 0.5) - receiver;
-                float distance = length(ray);
-                vec3 colour = lpvColour(material);
-                colour *= colour;
-#if ENABLE_COLOURED_LIGHTING == 0
-                colour = vec3(luma(colour));
-#endif
-                vec3 transmission = texelFetch(colortex11,
-                    address + ivec2(0, entry * textureSize(colortex8, 0).y), 0).rgb;
-                vec3 radiance = colour * lpvSourceEnergy(distance, lpvEmission(material)) * transmission;
-                sum += materialAnisotropicSpecular(m, normal, tangent, view,
-                    ray / max(distance, 0.00001), radiance, anisotropy) * weight;
-            }
-        }
-    }
-    vec3 border = vec3(lpvShape()) * 0.5 - abs(world - cameraPosition);
-    return sum * smoothstep(1.0, 5.0, min(border.x, min(border.y, border.z)));
-#else
-    return vec3(0.0);
-#endif
-}
+#include "/lib/transparent_pbr.glsl"
 
 vec3 pbrDirectGloss(SurfaceMaterial m, vec3 normal, vec3 position, vec2 uv,
                     vec2 lightmap, vec3 shadow) {
-    vec3 tangent = pbrGlossTangent(normal, position, uv);
-    vec3 view = safeNormalize(-position, normal);
-    float anisotropy = MATERIAL_ANISOTROPY * (1.0 - m.roughness);
-    vec3 solar = materialAnisotropicSpecular(m, normal, tangent, view,
-        normalize(sunPosition), getSunLightColor(), anisotropy)
-        + materialAnisotropicSpecular(m, normal, tangent, view,
-            normalize(moonPosition), getMoonLightColor(), anisotropy);
-    float sky = smoothstep(0.60, 0.96, lightmapLevel(lightmap.y));
-    solar *= shadow * sky * cloudProjectedShadow(viewToAbsoluteWorld(position),
-        normalize(mat3(gbufferModelViewInverse) * getLightDirView()));
-    return solar + pbrLocalGloss(m, normal, tangent, position, anisotropy);
+    return transparentDirectGloss(m, normal, position, pbrGlossTangent(normal, position, uv),
+        safeNormalize(-position, normal), lightmap, shadow);
 }
 
 vec3 computePbrLighting(LabPbrMaterial pbr, vec3 normal, vec2 lightmap, vec3 shadow,
@@ -3495,7 +3321,6 @@ void main() {
         : toLinearSpace(texel.rgb * vColor.rgb);
     vec4 albedo = vec4(albedoColor, texel.a * vColor.a);
     LabPbrMaterial pbr = readPbrSurface(albedoColor, materialUv);
-    SurfaceMaterial materialModel = pbrBrdfMaterial(pbr);
     bool reflective = max(max(pbr.f0.r, pbr.f0.g), pbr.f0.b) > 0.0001
         && ENABLE_MATERIAL_REFLECTIONS == 1 && MATERIAL_REFLECTION_STRENGTH > 0.0;
     bool glass = !water && reflective;
@@ -3550,29 +3375,11 @@ void main() {
         color = mix(color, scatter, getFogFactor(viewDistance));
     } else {
         // 透明介质的底色保留原生alpha，反射/高光由下方独立光学层统一处理。
-        color = computeSurfaceLighting(albedo.rgb, normalView, lmCoord, vec3(shadow), pbr.ao, vViewPos)
-            + pbr.albedo * pbr.emission * ORE_GLOW_STRENGTH * 4.0;
-#if ENABLE_MATERIAL_REFLECTIONS == 1
-        if (reflective) {
-            normalView *= dot(normalView, -vViewPos) >= 0.0 ? 1.0 : -1.0;
-            SurfaceMaterial m = materialModel;
-            vec3 incident = normalize(vViewPos);
-            vec3 world = normalize(mat3(gbufferModelViewInverse) * normalView);
-            vec3 environment = materialAmbientEnvironment(world, lmCoord);
-            vec3 fresnel = materialEnvironmentWeight(m, dot(normalView, -incident))
-                         * MATERIAL_REFLECTION_STRENGTH;
-            float alpha = clamp(albedo.a, 0.0, 1.0);
-            float reflectionAlpha = max(max(fresnel.r, fresnel.g), fresnel.b);
-            albedo.a = alpha + (1.0 - alpha) * reflectionAlpha;
-            vec3 reflection = environment * fresnel;
-            reflection += pbrDirectGloss(m, normalView, vViewPos, vTexCoord, lmCoord, vec3(shadow))
-                        * MATERIAL_REFLECTION_STRENGTH;
-            // Convert the optical result to straight alpha for the loader's blend.
-            // Reflection stays visible in clear glass texels whose gtexture alpha is zero.
-            color = (color * alpha * (1.0 - fresnel) + reflection) / max(albedo.a, 0.001);
-        }
-#endif
-        color = applyFog(color, viewDistance);
+        vec3 view = safeNormalize(-vViewPos, normalView);
+        vec3 tangent = pbrGlossTangent(normalView, vViewPos, vTexCoord);
+        vec4 layer = transparentPbrLayer(pbr, normalView, tangent, vViewPos, view, lmCoord, shadow, albedo.a);
+        color = layer.rgb;
+        albedo.a = layer.a;
     }
 
     // 光学密度保存在 colortex7，低 alpha 不能让加载器丢掉水面几何数据。

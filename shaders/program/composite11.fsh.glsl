@@ -2651,14 +2651,25 @@ bool validWaterMediumHistory(vec4 history) {
 
 // 水面几何与参数各自以 alpha=1 标记有效片元，玻璃以 alpha=0 保留这些数据。
 // 返回既有逻辑使用的布局：八面体法线 RG、天空可见度 B、线性视图深度 A。
-vec4 readWaterSurface(sampler2D geometry, sampler2D parameters, vec2 uv) {
+#include "/lib/water_screen_images.glsl"
+
+vec4 readWaterSurface(sampler2D geometry, vec2 uv) {
     vec4 surface = texture(geometry, uv);
     if (surface.a < 0.5) {
         return vec4(0.0);
     }
-    float sky = texture(parameters, uv).r;
+    float sky = waterScreenParameters(uv).r;
     return vec4(surface.rg, sky, surface.b);
 }
+
+// Full-resolution passes address an actual fragment centre and need a single
+// parameter texel. Reduced-resolution probes retain filtered sampling.
+vec4 waterSurfaceAtPixel(sampler2D geometry, ivec2 pixel) {
+    vec4 surface = texelFetch(geometry, pixel, 0);
+    if (surface.a < 0.5) return vec4(0.0);
+    return vec4(surface.rg, imageLoad(colorimg1, pixel).r, surface.b);
+}
+
 
 vec3 readWaterScattering(sampler2D geometry, sampler2D scattering, vec2 uv) {
     return texture(scattering, uv).rgb;
@@ -2700,7 +2711,7 @@ vec3 decodeWaterNormal(vec2 encoded) {
 
 // 优先读取原生水柱深度与水面天光，避免深水亮度随相机朝向变化。
 // 缺少新元数据时退回屏幕探针，仍只接受水平水面并平均水深。
-vec2 estimateWaterMedium(sampler2D surfaces, sampler2D parameters) {
+vec2 estimateWaterMedium(sampler2D surfaces) {
     if (hasCompanionLighting()) {
         vec4 medium = texture(companionAtlas, vec2(0.5, 7.5) / companionAtlasSize());
         if (abs(medium.w - 1573.0) < 0.5 && medium.z > 0.5) {
@@ -2712,7 +2723,7 @@ vec2 estimateWaterMedium(sampler2D surfaces, sampler2D parameters) {
     for (int x = 0; x < 3; x++) {
         for (int y = 0; y < 3; y++) {
             vec2 uv = vec2(0.15 + float(x) * 0.35, 0.60 + float(y) * 0.18);
-            vec4 surface = readWaterSurface(surfaces, parameters, uv);
+            vec4 surface = readWaterSurface(surfaces, uv);
             if (surface.a > 0.001) {
                 vec3 normal = mat3(gbufferModelViewInverse) * decodeWaterNormal(surface.xy);
                 vec3 relative = (gbufferModelViewInverse
@@ -4000,6 +4011,9 @@ vec3 waterShadowCoordinate(vec3 worldRelative) {
 
 // Decode native opaque samples independently of any water or glass in front.
 uniform sampler2D colortex5;
+#ifdef WATER_TRANSMISSION_PASS
+#define WATER_NATIVE_GLASS
+#endif
 #include "/lib/water_native_faces.glsl"
 
 vec3 waterCasterRecord(ivec2 pixel) {
@@ -4604,8 +4618,8 @@ vec3 transmitWaterSample(vec2 uv, vec3 position, vec3 opticalNormal, vec4 surfac
         opaqueWorld = viewToAbsoluteWorld(opaquePosition);
         receiverNormal = waterBedNormal(sourceUv, opaquePosition, depthtex1);
         // 水后的玻璃等与水底使用同一折射坐标；岸上的前景层继续由主像素合成。
-        vec4 backgroundLayer = texture(colortex2, sourceUv);
-        vec4 sourceWater = readWaterSurface(colortex9, colortex1, sourceUv);
+        vec4 backgroundLayer = waterScreenLayer(sourceUv);
+        vec4 sourceWater = waterSurfaceAtPixel(colortex9, ivec2(sourceUv * vec2(viewWidth, viewHeight)));
         float sourceDepth = -screenToView(sourceUv, texture(depthtex0, sourceUv).r).z;
         if (transparentLayerInFront(sourceDepth, sourceWater.a, backgroundLayer.a)) {
             backgroundLayer = vec4(0.0);
@@ -4648,7 +4662,7 @@ vec3 transmitWaterSample(vec2 uv, vec3 position, vec3 opticalNormal, vec4 surfac
     // 遮蔽水底的部分由受光水色补足，不再额外折半，避免不透明深水趋近蓝黑。
     transmitted += scattering.rgb * (1.0 - transmittance);
     // 浅水薄层逐渐变透明，使近岸与水底细节自然显现。
-    float surfaceOpacity = texture(colortex1, uv).g * smoothstep(0.0, 1.5, verticalDepth);
+    float surfaceOpacity = imageLoad(colorimg1, ivec2(gl_FragCoord.xy)).g * smoothstep(0.0, 1.5, verticalDepth);
     transmitted = mix(transmitted, scattering.rgb, surfaceOpacity);
 
     return transmitted;
@@ -4672,7 +4686,7 @@ vec3 waterInterfaceNormal(vec3 position, vec3 originWorld, float sky) {
 
 // 折射改变水底的投影位置；吸收仍由采样处的真实水内距离决定。
 vec3 applyWaterReflection(vec3 color, vec2 uv, float normalVariance) {
-    vec4 surface = readWaterSurface(colortex9, colortex1, uv);
+    vec4 surface = waterSurfaceAtPixel(colortex9, ivec2(gl_FragCoord.xy));
     if (surface.a <= 0.001 || isEyeInWater != 0) {
         return color;
     }
@@ -4898,7 +4912,13 @@ vec3 underwaterBackgroundColor(vec2 uv) {
     return cloud.rgb + skyRadiance(direction) * (1.0 - cloud.a);
 }
 
+#ifdef WATER_TRANSMISSION_PASS
+#include "/lib/labpbr_decode.glsl"
+#include "/lib/pbr_height.glsl"
+#include "/lib/transparent_pbr.glsl"
+#include "/lib/water_glass.glsl"
 #include "/lib/water_exit.glsl"
+#endif
 
 // 全反射只查询水下场景。离屏或无命中时使用受当地照明控制的水色。
 vec3 underwaterInterfaceReflection(vec3 interfaceView, vec3 direction, float waterHeight) {
@@ -4927,7 +4947,7 @@ vec4 applyUnderwaterOptics(vec2 uv) {
     // 天空只需要方向；避免在无限远投影的 depth=1 处除以零。
     vec3 opaquePosition = screenToView(uv, opaqueDepth < 0.999999 ? opaqueDepth : 0.5);
     vec3 opaqueWorld = viewToAbsoluteWorld(opaquePosition);
-    vec4 surface = readWaterSurface(colortex9, colortex1, uv);
+    vec4 surface = waterSurfaceAtPixel(colortex9, ivec2(gl_FragCoord.xy));
     float path = underwaterVisiblePath(uv, opaqueDepth, surface.a, eyeDepth);
     float sceneDistance = opaqueDepth < 0.999999 ? length(opaquePosition) : far;
     vec3 rayWorld = skyViewDirection(uv);
@@ -4969,7 +4989,7 @@ vec4 applyUnderwaterOptics(vec2 uv) {
 #if DEBUG_VIEW == 0
         if (rainStrength > 0.001 && inside) {
             bool waterPresent = texture(colortex9, radianceUv).a > 0.5;
-            air = applyRainOverlay(air, texture(colortex1, radianceUv), waterPresent);
+            air = applyRainOverlay(air, waterScreenParameters(radianceUv), waterPresent);
         }
 #endif
         transmission = (1.0 - reflectance) * window;
@@ -4978,7 +4998,7 @@ vec4 applyUnderwaterOptics(vec2 uv) {
 #else
     vec3 radiance = texture(colortex0, uv).rgb;
     if (texture(colortex9, uv).a > 0.5) {
-        radiance = applyTransparentLayer(underwaterBackgroundColor(uv), texture(colortex2, uv));
+        radiance = applyTransparentLayer(underwaterBackgroundColor(uv), waterScreenLayer(uv));
     }
     vec3 normalWorld = waterReceiverNormal(opaqueWorld);
     if (opaqueDepth < 0.999999) {
@@ -5430,7 +5450,7 @@ vec4 upsampleClouds(vec2 uv, float distance) {
                                   0.5 / size, 1.0 - 0.5 / size);
             float depth = texture(depthtex1, sampleUv).r;
             float neighbourDistance = depth < 0.999999 ? length(screenToView(sampleUv, depth)) : CLOUD_DISTANCE;
-            float surface = readWaterSurface(colortex9, colortex1, sampleUv).a;
+            float surface = readWaterSurface(colortex9, sampleUv).a;
             if (surface > 0.001) {
                 neighbourDistance = min(neighbourDistance, length(waterSurfacePosition(sampleUv, surface)));
             }
@@ -5453,7 +5473,7 @@ vec4 upsampleClouds(vec2 uv, float distance) {
 void main() {
     ivec2 pixel = ivec2(gl_FragCoord.xy);
     vec2 uv = gl_FragCoord.xy / vec2(viewWidth, viewHeight);
-    vec4 surface = readWaterSurface(colortex9, colortex1, uv);
+    vec4 surface = waterSurfaceAtPixel(colortex9, ivec2(gl_FragCoord.xy));
     if (isEyeInWater == 1) {
         fullOut0 = applyUnderwaterOptics(uv);
         return;
@@ -5483,7 +5503,7 @@ void main() {
     vec3 color = scene.rgb;
     float backgroundTransmission = rainStrength > 0.001 ? clamp(scene.a, 0.0, 1.0) : 1.0;
     float sceneDistance = depth < 0.999999 ? length(screenToView(screenCoord, depth)) : CLOUD_DISTANCE;
-    vec4 waterSurface = readWaterSurface(colortex9, colortex1, screenCoord);
+    vec4 waterSurface = waterSurfaceAtPixel(colortex9, ivec2(gl_FragCoord.xy));
     float waterDepth = waterSurface.a;
     // 在水面分支前求法线变化率，保证轮廓附近的屏幕导数也有定义。
     vec3 waterNormal = decodeWaterNormal(waterSurface.xy);
@@ -5496,7 +5516,7 @@ void main() {
     if (waterDepth > 0.001 && isEyeInWater == 0) {
         vec3 waterPosition = waterSurfacePosition(screenCoord, waterDepth);
         sceneDistance = min(sceneDistance, length(waterPosition));
-        vec4 transparentLayer = texture(colortex2, screenCoord);
+        vec4 transparentLayer = waterScreenLayer(screenCoord);
         bool inFront = transparentLayerInFront(-screenToView(screenCoord, depth).z,
                                                waterDepth, transparentLayer.a);
         color = applyWaterReflection(color, screenCoord, normalVariance);
@@ -5526,7 +5546,7 @@ void main() {
     color = cloud.rgb + color * (1.0 - cloud.a);
 #if DEBUG_VIEW == 0
     // 天气只在近处光学处理完成后叠加一次，云背景与无云背景使用同一雨层。
-    color = applyRainOverlay(color, texture(colortex1, screenCoord), waterDepth > 0.001);
+    color = applyRainOverlay(color, imageLoad(colorimg1, ivec2(gl_FragCoord.xy)), waterDepth > 0.001);
 #endif
     fullOut0 = vec4(color, 1.0);
 }

@@ -29,6 +29,16 @@ const int waterFarSlots = 65536;
 const int waterMacroCount = 16384;
 const int waterColumnCount = 1088;
 const int waterTotalFaces = waterFaceCount + waterFarSlots;
+const int waterGlassSlots = 8192;
+const uint waterGlassMask = 15u << 24u;
+const int waterRecordWords = (waterTotalFaces + waterGlassSlots) * waterFaceWords;
+const int waterIndexWords = waterFarSlots + waterGlassSlots;
+
+// Separate column masks keep transparent-only queries out of opaque terrain.
+// The last row also contains the lightmap (0..15) and the frame stamp (17).
+ivec2 waterGlassColumn(int column) {
+    return ivec2(32 + column, imageSize(colorimg5).y - 1);
+}
 
 ivec3 waterFarOrigin() {
     return ivec3(floor(cameraPosition)) - waterFarSize / 2;
@@ -41,7 +51,7 @@ bool waterFarInside(ivec3 local) {
 ivec2 waterStorageAddress(int offset) {
     ivec2 size = imageSize(colorimg5);
     int end = (size.y - 1) * size.x;
-    int address = end - waterTotalFaces * waterFaceWords - waterFarSlots - waterMacroCount - waterColumnCount + offset;
+    int address = end - waterRecordWords - waterIndexWords - waterMacroCount - waterColumnCount + offset;
 #if defined(COLOURED_VOLUME_SIZE) && (ENABLE_COLOURED_LIGHTING == 1 || GI_QUALITY > 0)
     const int profileWidth = COLOURED_VOLUME_SIZE * 8;
 #else
@@ -58,16 +68,20 @@ ivec2 waterFaceAddress(int record, int word) {
 }
 
 ivec2 waterKeyAddress(int slot) {
-    return waterStorageAddress(waterTotalFaces * waterFaceWords + slot);
+    return waterStorageAddress(waterRecordWords + slot);
+}
+
+ivec2 waterGlassKeyAddress(int slot) {
+    return waterStorageAddress(waterRecordWords + waterFarSlots + slot);
 }
 
 ivec2 waterMacroAddress(int index) {
-    return waterStorageAddress(waterTotalFaces * waterFaceWords + waterFarSlots + index);
+    return waterStorageAddress(waterRecordWords + waterIndexWords + index);
 }
 
 // A 32-bit mask covers all two-block height bands in a horizontal column.
 ivec2 waterColumnAddress(int index) {
-    return waterStorageAddress(waterTotalFaces * waterFaceWords + waterFarSlots + waterMacroCount + index);
+    return waterStorageAddress(waterRecordWords + waterIndexWords + waterMacroCount + index);
 }
 
 int waterColumnIndex(ivec3 cell, int side) {
@@ -87,24 +101,29 @@ uint waterMacroBits(ivec3 cell, int axis, bool negative) {
     return (1u << uint(6 * (cell.y & 3) + 2 * axis + int(negative))) | (1u << uint(24 + octant));
 }
 
-int waterFindFace(ivec3 owner, int axis, bool negative, bool create) {
+int waterFindFace(ivec3 owner, int axis, bool negative, bool create, bool glass) {
     ivec3 nearCell = owner - waterFaceOrigin();
-    if (waterFaceInside(nearCell)) return waterFaceRecord(nearCell, axis, negative);
+    if (!glass && waterFaceInside(nearCell)) return waterFaceRecord(nearCell, axis, negative);
     ivec3 cell = owner - waterFarOrigin();
     if (!waterFarInside(cell)) return -1;
     uint key = uint(6 * (cell.x + waterFarSize.x * (cell.y + waterFarSize.y * cell.z))
         + 2 * axis + int(negative) + 1);
     uint hash = (key ^ (key >> 16u)) * 0x7feb352du;
     hash = (hash ^ (hash >> 15u)) * 0x846ca68bu;
-    int home = int((hash ^ (hash >> 16u)) & uint(waterFarSlots - 1));
+    int slots = glass ? waterGlassSlots : waterFarSlots;
+    int home = int((hash ^ (hash >> 16u)) & uint(slots - 1));
     for (int probe = 0; probe < 8; ++probe) {
-        int slot = (home + probe) & (waterFarSlots - 1);
-        ivec2 address = waterKeyAddress(slot);
+        int slot = (home + probe) & (slots - 1);
+        ivec2 address = glass ? waterGlassKeyAddress(slot) : waterKeyAddress(slot);
         uint entry = create ? imageAtomicCompSwap(colorimg5, address, 0u, key) : imageLoad(colorimg5, address).r;
-        if (entry == key || (create && entry == 0u)) return waterFaceCount + slot;
+        if (entry == key || (create && entry == 0u)) return (glass ? waterTotalFaces : waterFaceCount) + slot;
         if (!create && entry == 0u) break;
     }
     return -1;
+}
+
+int waterFindFace(ivec3 owner, int axis, bool negative, bool create) {
+    return waterFindFace(owner, axis, negative, create, false);
 }
 
 vec2 waterFaceAxes(vec3 v, int axis) {

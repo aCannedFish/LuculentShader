@@ -1179,12 +1179,14 @@ bool validWaterMediumHistory(vec4 history) {
 
 // 水面几何与参数各自以 alpha=1 标记有效片元，玻璃以 alpha=0 保留这些数据。
 // 返回既有逻辑使用的布局：八面体法线 RG、天空可见度 B、线性视图深度 A。
-vec4 readWaterSurface(sampler2D geometry, sampler2D parameters, vec2 uv) {
+#include "/lib/water_screen_images.glsl"
+
+vec4 readWaterSurface(sampler2D geometry, vec2 uv) {
     vec4 surface = texture(geometry, uv);
     if (surface.a < 0.5) {
         return vec4(0.0);
     }
-    float sky = texture(parameters, uv).r;
+    float sky = waterScreenParameters(uv).r;
     return vec4(surface.rg, sky, surface.b);
 }
 
@@ -1228,7 +1230,7 @@ vec3 decodeWaterNormal(vec2 encoded) {
 
 // 优先读取原生水柱深度与水面天光，避免深水亮度随相机朝向变化。
 // 缺少新元数据时退回屏幕探针，仍只接受水平水面并平均水深。
-vec2 estimateWaterMedium(sampler2D surfaces, sampler2D parameters) {
+vec2 estimateWaterMedium(sampler2D surfaces) {
     if (hasCompanionLighting()) {
         vec4 medium = texture(companionAtlas, vec2(0.5, 7.5) / companionAtlasSize());
         if (abs(medium.w - 1573.0) < 0.5 && medium.z > 0.5) {
@@ -1240,7 +1242,7 @@ vec2 estimateWaterMedium(sampler2D surfaces, sampler2D parameters) {
     for (int x = 0; x < 3; x++) {
         for (int y = 0; y < 3; y++) {
             vec2 uv = vec2(0.15 + float(x) * 0.35, 0.60 + float(y) * 0.18);
-            vec4 surface = readWaterSurface(surfaces, parameters, uv);
+            vec4 surface = readWaterSurface(surfaces, uv);
             if (surface.a > 0.001) {
                 vec3 normal = mat3(gbufferModelViewInverse) * decodeWaterNormal(surface.xy);
                 vec3 relative = (gbufferModelViewInverse
@@ -1273,7 +1275,7 @@ uniform sampler2D colortex9;
 uniform sampler2D colortex1;
 
 void main() {
-    vec2 medium = isEyeInWater == 1 ? estimateWaterMedium(colortex9, colortex1) : vec2(0.0);
+    vec2 medium = isEyeInWater == 1 ? estimateWaterMedium(colortex9) : vec2(0.0);
     fullOut0 = vec4(medium, float(frameCounter), isEyeInWater == 1 ? 4183.0 : 0.0);
 }
 

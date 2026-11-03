@@ -743,8 +743,7 @@ uniform sampler2D colortex3;
 // 下面这几个是 lib/debug.glsl 的调试视图要用的。
 // 该文件自己不声明采样器（因为它被不同程序共用，能读到的纹理不一样），
 // 所以在这里统一声明。用不到的调试视图会被编译器优化掉。
-uniform sampler2D colortex1;
-uniform sampler2D colortex2;
+#include "/lib/water_screen_images.glsl"
 uniform sampler2D depthtex0;
 
 /* 调试输出。按 DEBUG_VIEW 显示法线、光照贴图、阴影、深度、泛光或重建视图坐标。
@@ -779,8 +778,14 @@ vec3 applyDebugView(vec3 color, vec2 screenCoord) {
     return color;
 #else
     // 采样三张 G-Buffer，按需取用。
-    vec4 geomBuffer = texture(colortex1, screenCoord);
-    vec4 lightBuffer = texture(colortex2, screenCoord);
+    vec4 geomBuffer = waterScreenParameters(screenCoord);
+    ivec2 size = imageSize(colorimg2);
+    vec2 p = clamp(screenCoord * vec2(size) - 0.5, vec2(0.0), vec2(size - 1));
+    ivec2 a = ivec2(floor(p));
+    ivec2 b = min(a + 1, size - 1);
+    vec2 f = fract(p);
+    vec4 lightBuffer = mix(mix(imageLoad(colorimg2, a), imageLoad(colorimg2, ivec2(b.x,a.y)), f.x),
+                           mix(imageLoad(colorimg2, ivec2(a.x,b.y)), imageLoad(colorimg2, b), f.x), f.y);
 
     #if DEBUG_VIEW == 1
         // 视图空间法线，八面体编码在 RG 两个通道里（见 lib/common.glsl 的 encodeNormal）

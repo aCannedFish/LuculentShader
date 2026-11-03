@@ -1717,11 +1717,11 @@ layout(r32ui, binding=5) uniform uimage2D colorimg5;
 #endif
 #include "/lib/water_face_cache.glsl"
 
-// Capture only native solid and alpha-tested terrain. Each corner
-// carries its own active atlas UV, tint, AO and light levels.
-void waterCaptureFace(vec3 centre, vec3 normal) {
+// Each corner carries its active atlas UV, tint, AO and light levels.
+// Transparent terrain has its own class and can never supply an opaque hit.
+void waterCaptureFace(vec3 centre, vec3 normal, bool glass) {
 #if SIMPLE_DIMENSION == 0 && ENABLE_SHADOWS == 1
-    if (renderStage != 8 && renderStage != 9) return;
+    if (renderStage != 8 && renderStage != 9 && !glass) return;
     ivec3 owner = ivec3(floor(centre));
     ivec3 cell = owner - waterFarOrigin();
     if (!waterFarInside(cell)) return;
@@ -1731,7 +1731,7 @@ void waterCaptureFace(vec3 centre, vec3 normal) {
     vec3 offset = -at_midBlock / 64.0;
     if (abs(offset[axis] - sign(normal[axis]) * 0.5) > 0.001) return;
     vec2 local = waterFaceAxes(offset, axis);
-    int face = waterFindFace(owner, axis, normal[axis] < 0.0, true);
+    int face = waterFindFace(owner, axis, normal[axis] < 0.0, true, glass);
     if (face < 0) return;
     if (any(greaterThan(abs(abs(local) - 0.5), vec2(0.001)))) {
         imageAtomicOr(colorimg5, waterFaceAddress(face, 2), 16u);
@@ -1768,17 +1768,29 @@ void waterCaptureFace(vec3 centre, vec3 normal) {
     uvec2 lm = uvec2(round(clamp(vec2(vaUV2) / 240.0, 0.0, 1.0) * 15.0));
     uint attributes = tint.x | (tint.y << 5u) | (tint.z << 11u) | (ao << 16u)
         | (lm.x << 20u) | (lm.y << 24u);
+    if (glass) {
+        uint alpha = uint(round(clamp(vaColor.a < 0.1 ? 1.0 : vaColor.a, 0.0, 1.0) * 255.0));
+        attributes = (attributes & 0xfff0ffffu) | ((alpha & 15u) << 16u) | ((alpha >> 4u) << 28u);
+    }
     imageAtomicExchange(colorimg5, waterFaceAddress(face, 4 + layer * 8 + corner), packUnorm2x16(uv));
     imageAtomicExchange(colorimg5, waterFaceAddress(face, 8 + layer * 8 + corner), attributes);
     // Keep coverage and the union of cutout priorities in the same atomic
     // word. Traversal can now select a layer without fetching its four colours.
-    uint coverage = (1u << uint(corner)) | (priority > 0.0 ? 1u << (8u + uint(priority)) : 0u);
+    uint coverage = 1u << uint(corner + (glass ? 24 : 0));
+    coverage |= priority > 0.0 ? 1u << (8u + uint(priority)) : 0u;
     uint previous = imageAtomicOr(colorimg5, waterFaceAddress(face, 2 + layer), coverage);
     if (previous == 0u) {
         imageAtomicOr(colorimg5, waterMacroAddress(waterMacroIndex(cell)), waterMacroBits(cell, axis, normal[axis] < 0.0));
         uint heightBand = 1u << uint(cell.y >> 1);
         imageAtomicOr(colorimg5, waterColumnAddress(waterColumnIndex(cell,4)), heightBand);
         imageAtomicOr(colorimg5, waterColumnAddress(waterColumnIndex(cell,16)), heightBand);
+        if (glass) {
+            imageAtomicOr(colorimg5, waterGlassColumn(waterColumnIndex(cell, 16) - 1024), heightBand);
+            int row = imageSize(colorimg5).y - 1;
+            imageAtomicOr(colorimg5, ivec2(18, row), 1u << uint(cell.x >> 2));
+            imageAtomicOr(colorimg5, ivec2(19, row), heightBand);
+            imageAtomicOr(colorimg5, ivec2(20, row), 1u << uint(cell.z >> 2));
+        }
     }
 #endif
 }
@@ -1832,7 +1844,8 @@ void main() {
     vCasterNormal = mat3(shadowModelViewInverse) * normalMatrix * vaNormal;
     vec3 nativeCentre = (shadowModelViewInverse * modelViewMatrix
         * vec4(vaPosition + modelOffset, 1.0)).xyz + cameraPosition + at_midBlock / 64.0;
-    waterCaptureFace(nativeCentre, normalize(vCasterNormal));
+    bool exitLayer = renderStage == 16 && isEyeInWater == 1 && abs(legacyEntity.x - 100.0) > 0.5;
+    waterCaptureFace(nativeCentre, normalize(vCasterNormal), exitLayer);
     ivec3 parity = ivec3(floor(nativeCentre)) & 1;
     vWaterFaceParity = (renderStage == 8 || renderStage == 9) && all(lessThanEqual(abs(at_midBlock), vec3(32.01)))
         ? parity.x + 2 * parity.y + 4 * parity.z : -1;
