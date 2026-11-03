@@ -1767,14 +1767,18 @@ void waterCaptureFace(vec3 centre, vec3 normal) {
     uint ao = uint(round(clamp(vaColor.a < 0.1 ? 1.0 : vaColor.a, 0.0, 1.0) * 15.0));
     uvec2 lm = uvec2(round(clamp(vec2(vaUV2) / 240.0, 0.0, 1.0) * 15.0));
     uint attributes = tint.x | (tint.y << 5u) | (tint.z << 11u) | (ao << 16u)
-        | (lm.x << 20u) | (lm.y << 24u) | (uint(priority) << 28u);
+        | (lm.x << 20u) | (lm.y << 24u);
     imageAtomicExchange(colorimg5, waterFaceAddress(face, 4 + layer * 8 + corner), packUnorm2x16(uv));
     imageAtomicExchange(colorimg5, waterFaceAddress(face, 8 + layer * 8 + corner), attributes);
-    uint previous = imageAtomicOr(colorimg5, waterFaceAddress(face, 2 + layer), 1u << uint(corner));
+    // Keep coverage and the union of cutout priorities in the same atomic
+    // word. Traversal can now select a layer without fetching its four colours.
+    uint coverage = (1u << uint(corner)) | (priority > 0.0 ? 1u << (8u + uint(priority)) : 0u);
+    uint previous = imageAtomicOr(colorimg5, waterFaceAddress(face, 2 + layer), coverage);
     if (previous == 0u) {
-        imageAtomicOr(colorimg5, waterMacroAddress(waterMacroIndex(cell)), 1u << uint(cell.y & 3));
-        imageAtomicMax(colorimg5, waterColumnAddress(waterColumnIndex(cell,4)), uint(cell.y+1));
-        imageAtomicMax(colorimg5, waterColumnAddress(waterColumnIndex(cell,16)), uint(cell.y+1));
+        imageAtomicOr(colorimg5, waterMacroAddress(waterMacroIndex(cell)), waterMacroBits(cell, axis, normal[axis] < 0.0));
+        uint heightBand = 1u << uint(cell.y >> 1);
+        imageAtomicOr(colorimg5, waterColumnAddress(waterColumnIndex(cell,4)), heightBand);
+        imageAtomicOr(colorimg5, waterColumnAddress(waterColumnIndex(cell,16)), heightBand);
     }
 #endif
 }

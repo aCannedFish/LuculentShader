@@ -4369,7 +4369,7 @@ vec4 queryWaterRadiance(vec3 position, vec3 direction, float roughness, float sk
             && waterSunIntersection(position, direction, maximum, sunDistance, sunPixel);
         float faceDistance;
         vec3 faceNormal;
-        WaterFaceSample material;
+        WaterFaceHit material;
         bool nativeHit = waterNearFaceHit(position, direction,
             min(sunHit ? sunDistance + 0.015 : maximum, 96.0), faceDistance, faceNormal, material);
         if (nativeHit || sunHit) {
@@ -4566,7 +4566,7 @@ vec3 transmitWaterSample(vec2 uv, vec3 position, vec3 opticalNormal, vec4 surfac
             float faceDistance;
             float faceLimit = sunHit ? alternateDistance + 0.015 : extent;
             vec3 faceNormal;
-            WaterFaceSample material;
+            WaterFaceHit material;
             bool nativeHit = waterNearFaceHit(position, ray, faceLimit, faceDistance, faceNormal, material);
             if (nativeHit || sunHit) {
                 if (nativeHit) alternateDistance = faceDistance;

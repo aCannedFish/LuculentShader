@@ -42,6 +42,14 @@ ivec2 waterStorageAddress(int offset) {
     ivec2 size = imageSize(colorimg5);
     int end = (size.y - 1) * size.x;
     int address = end - waterTotalFaces * waterFaceWords - waterFarSlots - waterMacroCount - waterColumnCount + offset;
+#if defined(COLOURED_VOLUME_SIZE) && (ENABLE_COLOURED_LIGHTING == 1 || GI_QUALITY > 0)
+    const int profileWidth = COLOURED_VOLUME_SIZE * 8;
+#else
+    const int profileWidth = 256;
+#endif
+    // A constant divisor avoids integer division for each recorded vertex
+    // attribute. Keep the actual allocation authoritative on other layouts.
+    if (size.x == profileWidth) return ivec2(address % profileWidth, address / profileWidth);
     return ivec2(address % size.x, address / size.x);
 }
 
@@ -57,7 +65,7 @@ ivec2 waterMacroAddress(int index) {
     return waterStorageAddress(waterTotalFaces * waterFaceWords + waterFarSlots + index);
 }
 
-// Maximum occupied cell height in each horizontal 4x4 and 16x16 column.
+// A 32-bit mask covers all two-block height bands in a horizontal column.
 ivec2 waterColumnAddress(int index) {
     return waterStorageAddress(waterTotalFaces * waterFaceWords + waterFarSlots + waterMacroCount + index);
 }
@@ -69,6 +77,14 @@ int waterColumnIndex(ivec3 cell, int side) {
 int waterMacroIndex(ivec3 local) {
     ivec3 macro = local / 4;
     return macro.x + waterMacroSize.x * (macro.y + waterMacroSize.y * macro.z);
+}
+
+// Each 4x4x4 macro stores the submitted face directions for its four
+// horizontal slices (24 bits), and which 2x2x2 octants have any records.
+uint waterMacroBits(ivec3 cell, int axis, bool negative) {
+    ivec3 halfCell = (cell & 3) >> 1;
+    int octant = halfCell.x + 2 * halfCell.y + 4 * halfCell.z;
+    return (1u << uint(6 * (cell.y & 3) + 2 * axis + int(negative))) | (1u << uint(24 + octant));
 }
 
 int waterFindFace(ivec3 owner, int axis, bool negative, bool create) {

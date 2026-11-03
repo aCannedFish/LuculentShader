@@ -19,7 +19,7 @@ vec3 waterExitRadiance(vec2 uv, vec3 interfaceView, vec3 airDirection,
                        out vec2 sourceUv, out bool cameraSource) {
     vec3 ray = mat3(gbufferModelView) * airDirection;
     vec3 faceNormal;
-    WaterFaceSample material;
+    WaterFaceHit material;
     WaterRayHit layer;
     WaterRayHit seen = traceWaterGeometry(uv, interfaceView, ray, far, depthtex2, true, layer);
     vec2 pixelUv = waterBedUv(seen.uv);

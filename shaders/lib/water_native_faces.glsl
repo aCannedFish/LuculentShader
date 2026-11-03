@@ -13,53 +13,53 @@ bool waterFacesReady() {
 bool waterOpaqueUnitFace(ivec3 owner, int axis, bool negative) {
     int face = waterFindFace(owner, axis, negative, false);
     return face >= 0 && imageLoad(colorimg5, waterFaceAddress(face, 2)).r == 15u
-        && imageLoad(colorimg5, waterFaceAddress(face, 3)).r == 0u
-        && (imageLoad(colorimg5, waterFaceAddress(face, 8)).r >> 28u) == 0u;
+        && imageLoad(colorimg5, waterFaceAddress(face, 3)).r == 0u;
 }
 
-struct WaterFaceSample {
-    vec3 albedo;
-    vec2 lm;
-    float ao;
-    uint priority;
+struct WaterFaceHit {
+    int record;
+    int layer;
+    vec2 localUv;
 };
 
-// Resolve the four real vertex attributes at the physical hit, preserving the
-// sprite rotation and the owning face on either side of a material boundary.
-bool waterReadLayer(int face, int layer, vec2 f, vec3 hitView, out WaterFaceSample sampleData) {
-    uint priority = 0u;
+float waterCornerWeight(int corner, vec2 uv) {
+    return ((corner & 1) == 0 ? 1.0 - uv.x : uv.x) * (corner < 2 ? 1.0 - uv.y : uv.y);
+}
+
+// Alpha tests and final shading use the same four captured UVs and mip level.
+vec4 waterFaceTexel(WaterFaceHit hit, vec3 hitView) {
     vec2 uv = vec2(0.0);
-    vec2 low = vec2(1.0), high = vec2(0.0);
+    vec2 low = vec2(1.0);
+    vec2 high = vec2(0.0);
+    for (int i = 0; i < 4; ++i) {
+        ivec2 slot = waterFaceAddress(hit.record, 4 + 8 * hit.layer + i);
+        vec2 address = unpackUnorm2x16(imageLoad(colorimg5, slot).r);
+        uv += waterCornerWeight(i, hit.localUv) * address;
+        low = min(low, address);
+        high = max(high, address);
+    }
+    vec2 atlas = vec2(textureSize(colortex5, 0));
+    vec2 inset = min(0.5 / atlas, (high - low) * 0.5);
+    float rate = max((high.x - low.x) * atlas.x, (high.y - low.y) * atlas.y);
+    float footprint = 2.0 * abs(hitView.z * gbufferProjectionInverse[1][1]) / viewHeight;
+    return textureLod(colortex5, clamp(uv, low + inset, high - inset),
+        max(log2(max(rate * footprint, 1.0)), 0.0));
+}
+
+// Fetch colour, AO and lightmap only for a receiver that actually needs
+// native shading. A visibility query on an opaque face needs none of them.
+vec3 waterLightFace(WaterFaceHit hit, vec3 normal, vec3 hitView) {
     vec3 tint = vec3(0.0);
     vec2 lm = vec2(0.0);
     float ao = 0.0;
     for (int i = 0; i < 4; ++i) {
-        vec2 address = unpackUnorm2x16(imageLoad(colorimg5, waterFaceAddress(face, 4 + 8 * layer + i)).r);
-        uint data = imageLoad(colorimg5, waterFaceAddress(face, 8 + 8 * layer + i)).r;
-        priority = max(priority, data >> 28u);
-        float weight = ((i & 1) == 0 ? 1.0 - f.x : f.x) * (i < 2 ? 1.0 - f.y : f.y);
-        uv += weight * address;
-        low = min(low, address);
-        high = max(high, address);
+        uint data = imageLoad(colorimg5, waterFaceAddress(hit.record, 8 + 8 * hit.layer + i)).r;
+        float weight = waterCornerWeight(i, hit.localUv);
         tint += weight * vec3(data & 31u, (data >> 5u) & 63u, (data >> 11u) & 31u) / vec3(31,63,31);
         ao += weight * float((data >> 16u) & 15u) / 15.0;
         lm += weight * vec2((data >> 20u) & 15u, (data >> 24u) & 15u);
     }
-    vec2 atlas = vec2(textureSize(colortex5, 0));
-    // Stay inside this sprite even when the intersection lies exactly on a corner.
-    vec2 inset = min(0.5 / atlas, (high - low) * 0.5);
-    float rate = max((high.x - low.x) * atlas.x, (high.y - low.y) * atlas.y);
-    float footprint = 2.0 * abs(hitView.z * gbufferProjectionInverse[1][1]) / viewHeight;
-    vec4 texel = textureLod(colortex5, clamp(uv, low + inset, high - inset),
-        max(log2(max(rate * footprint, 1.0)), 0.0));
-    if (priority != 0u && texel.a < 0.1) return false;
-    sampleData = WaterFaceSample(toLinearSpace(texel.rgb * tint), (lm + 0.5) / 16.0, ao, priority);
-    return true;
-}
-
-// Illuminate the selected material only when the camera cannot supply its
-// radiance. Visibility traversal and overlay selection do not require GI.
-vec3 waterLightFace(WaterFaceSample material, vec3 normal, vec3 hitView) {
+    vec3 albedo = toLinearSpace(waterFaceTexel(hit, hitView).rgb * tint);
     vec3 coord = waterShadowCoordinate(viewToWorld(hitView) + normal * 0.015);
     vec3 transfer = vec3(1.0);
     if (all(greaterThan(coord, vec3(0.0))) && all(lessThan(coord, vec3(1.0)))) {
@@ -73,25 +73,28 @@ vec3 waterLightFace(WaterFaceSample material, vec3 normal, vec3 hitView) {
         }
     }
     samplingWaterCaster = true;
-    vec3 radiance = computeSurfaceLighting(material.albedo, mat3(gbufferModelView) * normal,
-        material.lm, transfer, material.ao, hitView);
+    vec3 radiance = computeSurfaceLighting(albedo, mat3(gbufferModelView) * normal,
+        (lm + 0.5) / 16.0, transfer, ao, hitView);
     samplingWaterCaster = false;
     return radiance;
 }
 
 // A slot is coverage, not occupancy. Respect alpha and decline ambiguous
 // overlapping materials rather than painting an unobserved face on a block.
-bool waterReadFace(int face, vec2 f, vec3 hitView, out WaterFaceSample material) {
+bool waterReadFace(int face, vec2 f, vec3 hitView, out WaterFaceHit material) {
     uint a = imageLoad(colorimg5, waterFaceAddress(face, 2)).r;
     uint b = imageLoad(colorimg5, waterFaceAddress(face, 3)).r;
-    if (a != 15u || (b != 0u && b != 15u)) return false;
-    bool first = waterReadLayer(face, 0, f, hitView, material);
+    if ((a & 31u) != 15u || (b != 0u && (b & 31u) != 15u)) return false;
+    material = WaterFaceHit(face, 0, f);
+    int firstPriority = max(findMSB(a >> 8u), 0);
+    bool first = firstPriority == 0 || waterFaceTexel(material, hitView).a >= 0.1;
     if (b == 0u) return first;
-    WaterFaceSample overlay;
-    bool second = waterReadLayer(face, 1, f, hitView, overlay);
+    WaterFaceHit overlay = WaterFaceHit(face, 1, f);
+    int secondPriority = max(findMSB(b >> 8u), 0);
+    bool second = secondPriority == 0 || waterFaceTexel(overlay, hitView).a >= 0.1;
     if (!second) return first;
-    if (first && overlay.priority == material.priority) return false;
-    if (!first || overlay.priority > material.priority) material = overlay;
+    if (first && secondPriority == firstPriority) return false;
+    if (!first || secondPriority > firstPriority) material = overlay;
     return true;
 }
 
@@ -110,19 +113,35 @@ vec4 waterOwnedColour(vec3 hitView, vec3 surfaceNormal) {
     if (abs(world[axis] - plane) > 0.012) return vec4(0.0);
     int face = waterFindFace(owner, axis, normal[axis] < 0.0, false);
     if (face < 0) return vec4(0.0);
-    WaterFaceSample material;
+    WaterFaceHit material;
     vec2 f = clamp(waterFaceAxes(world-vec3(owner), axis), 0.0, 1.0);
     if (!waterReadFace(face, f, hitView, material)) return vec4(0.0);
     return vec4(waterLightFace(material, normal, hitView), 1.0);
 }
 
+// In an empty height band, advance to the next recorded band or the column
+// boundary. Ascending, descending and horizontal rays use the same occupancy.
+bool waterColumnGap(uint mask, int y, int stepY, out int edge) {
+    int band = y >> 1;
+    if ((mask & (1u << uint(band))) != 0u) return false;
+    if (stepY >= 0) {
+        int next = findLSB(mask & (0xffffffffu << uint(band)));
+        edge = next < 0 ? waterFarSize.y : next * 2;
+    } else {
+        int next = findMSB(mask & (0xffffffffu >> uint(31 - band)));
+        edge = (next + 1) * 2;
+    }
+    return true;
+}
+
 // Consult only certified faces actually submitted this frame. Cell traversal
 // locates their boundary planes; it never interprets occupancy as a surface.
 bool waterNearFaceHit(vec3 position, vec3 direction, float limit, out float distance,
-                      out vec3 normal, out WaterFaceSample material) {
+                      out vec3 normal, out WaterFaceHit material) {
     distance = -1.0;
     if (!waterFacesReady() || limit <= 0.0) return false;
-    vec3 origin = viewToAbsoluteWorld(position);
+    vec3 relativeOrigin = viewToWorld(position);
+    vec3 origin = relativeOrigin + cameraPosition;
     vec3 ray = mat3(gbufferModelViewInverse) * direction;
     ivec3 grid = waterFarOrigin();
     ivec3 stepDir = ivec3(sign(ray));
@@ -134,25 +153,57 @@ bool waterNearFaceHit(vec3 position, vec3 direction, float limit, out float dist
     vec3 entry = mix(min(t0,t1), vec3(-1e8), lessThan(abs(ray),vec3(1e-8)));
     float cursor = max(0.0, max(entry.x, max(entry.y, entry.z)));
     ivec3 cell = ivec3(floor(localOrigin + ray * (cursor + 0.0003)));
+    if (!waterFarInside(cell)) return false;
+    int macro = waterMacroIndex(cell);
+    uint mask = imageLoad(colorimg5, waterMacroAddress(macro)).r;
+    uvec3 facing = uvec3(1u, 4u, 16u) << uvec3(greaterThan(stepDir, ivec3(0)));
+    uint wanted = facing.x | facing.y | facing.z;
+    int previousLarge = -1;
+    int previousSmall = -1;
+    uint largeColumn = 0u;
+    uint smallColumn = 0u;
     // Carry the crossed integer boundary exactly, including nearly tangent
     // rays where a small floating-point nudge rounds back into the old cell.
     for (int visit = 0; visit < 160 && cursor < limit; ++visit) {
-        if (!waterFarInside(cell)) break;
         ivec3 span = ivec3(1);
-        // Ascending rays above a whole column cannot encounter one of its
-        // submitted faces. Advance to the next horizontal column in one step.
-        float y = localOrigin.y + cursor * ray.y;
-        if (ray.y > 0.0 && y > float(imageLoad(colorimg5, waterColumnAddress(waterColumnIndex(cell,16))).r) + 0.001) {
-            span = ivec3(16, 128, 16);
-        } else if (ray.y > 0.0 && y > float(imageLoad(colorimg5, waterColumnAddress(waterColumnIndex(cell,4))).r) + 0.001) {
-            span = ivec3(4, 128, 4);
-        } else {
-            uint mask = imageLoad(colorimg5, waterMacroAddress(waterMacroIndex(cell))).r;
-            if (mask == 0u) span = ivec3(4);
-            else if ((mask & (1u << uint(cell.y & 3))) == 0u) span = ivec3(4,1,4);
+        int large = waterColumnIndex(cell, 16);
+        if (large != previousLarge) {
+            largeColumn = imageLoad(colorimg5, waterColumnAddress(large)).r;
+            previousLarge = large;
         }
-        ivec3 lower = cell / span * span;
-        vec3 border = vec3(lower) + step(vec3(0.0), ray) * vec3(span);
+        int edgeY = 0;
+        if (waterColumnGap(largeColumn, cell.y, stepDir.y, edgeY)) {
+            span = ivec3(16, 128, 16);
+        } else {
+            int small = waterColumnIndex(cell, 4);
+            if (small != previousSmall) {
+                smallColumn = imageLoad(colorimg5, waterColumnAddress(small)).r;
+                previousSmall = small;
+            }
+            uint allSlices = mask | (mask >> 6u) | (mask >> 12u) | (mask >> 18u);
+            ivec3 halfCell = (cell & 3) >> 1;
+            int octant = halfCell.x + 2 * halfCell.y + 4 * halfCell.z;
+            if (waterColumnGap(smallColumn, cell.y, stepDir.y, edgeY)) {
+                span = ivec3(4, 128, 4);
+            } else if ((allSlices & wanted) == 0u) {
+                span = ivec3(4);
+            } else if ((mask & (1u << uint(24 + octant))) == 0u) {
+                span = ivec3(2);
+            } else {
+                // A floor without a wall in this slice only needs the next
+                // vertical crossing. Recheck on entering a different slice.
+                uint slice = mask >> uint(6 * (cell.y & 3));
+                span.x = (slice & facing.x) == 0u ? 4 : 1;
+                span.z = (slice & facing.z) == 0u ? 4 : 1;
+            }
+        }
+        ivec3 lower = cell & ~(span - 1);
+        ivec3 upper = lower + span;
+        if (span.y == 128) {
+            if (stepDir.y < 0) lower.y = edgeY;
+            else upper.y = edgeY;
+        }
+        vec3 border = mix(vec3(lower), vec3(upper), greaterThanEqual(ray, vec3(0.0)));
         vec3 times = mix((border - localOrigin) * reciprocal, vec3(1e8), lessThan(abs(ray),vec3(1e-8)));
         int axis = times.x < min(times.y, times.z) ? 0 : (times.y < times.z ? 1 : 2);
         float t = times[axis];
@@ -160,19 +211,35 @@ bool waterNearFaceHit(vec3 position, vec3 direction, float limit, out float dist
         cursor = max(t, cursor);
         // Only the selected axis leaves this span. A distance epsilon can
         // jump a second boundary and miss the narrow top of a submerged step.
-        cell = clamp(ivec3(floor(localOrigin + ray * cursor)), lower, lower + span - 1);
+        // A span can cross several cells in a tangent direction. Evaluate
+        // the final side relative to a nearby integer plane; adding the
+        // grid origin first can round a micrometre-wide hit into the next cell.
+        ivec3 nearPlane = ivec3(round(localOrigin + ray * cursor));
+        precise vec3 relative = fma(ray, vec3(cursor), localOrigin - vec3(nearPlane));
+        cell = clamp(nearPlane - ivec3(lessThan(relative, vec3(0.0))), lower, upper - 1);
         cell[axis] = int(border[axis]) - int(stepDir[axis] < 0);
         if (!waterFarInside(cell)) break;
-        if ((imageLoad(colorimg5, waterMacroAddress(waterMacroIndex(cell))).r & (1u << uint(cell.y & 3))) == 0u) continue;
+        int nextMacro = waterMacroIndex(cell);
+        if (nextMacro != macro) {
+            macro = nextMacro;
+            mask = imageLoad(colorimg5, waterMacroAddress(macro)).r;
+        }
+        if (((mask >> uint(6 * (cell.y & 3))) & facing[axis]) == 0u) continue;
         ivec3 owner = cell + grid;
         int face = waterFindFace(owner, axis, stepDir[axis] > 0, false);
         if (face < 0) continue;
-        if (t <= 0.0005) continue;
+        // Reconstruct the final distance against the actual integer plane in
+        // camera-relative space. The traversal grid has up to 128 cells, so
+        // rounding its origin can noticeably shift a nearly parallel hit.
+        float plane = float(owner[axis] + int(stepDir[axis] < 0));
+        precise float hitDistance = ((plane - cameraPosition[axis]) - relativeOrigin[axis]) * reciprocal[axis];
+        if (hitDistance <= 0.0005 || hitDistance > limit) continue;
         normal = vec3(0.0);
         normal[axis] = -float(stepDir[axis]);
-        vec2 f = clamp(waterFaceAxes(localOrigin + ray*t - vec3(cell), axis), 0.0, 1.0);
-        if (waterReadFace(face, f, position + direction*t, material)) {
-            distance = t;
+        vec3 localHit = fma(ray, vec3(hitDistance), relativeOrigin + (cameraPosition - vec3(owner)));
+        vec2 f = clamp(waterFaceAxes(localHit, axis), 0.0, 1.0);
+        if (waterReadFace(face, f, position + direction * hitDistance, material)) {
+            distance = hitDistance;
             return true;
         }
     }

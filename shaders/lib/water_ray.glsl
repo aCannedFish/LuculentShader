@@ -1,4 +1,4 @@
-/* Intersect a Snell ray with visible opaque surfaces. The two tile sizes
+/* Intersect a water ray with visible scene surfaces. The three tile sizes
  * accelerate empty intervals. At a candidate pixel we intersect its local
  * surface plane and test the subpixel projection against that pixel's support.
  * Positions and distances remain in view space throughout the traversal.
@@ -120,6 +120,21 @@ WaterRayHit traceWaterGeometry(vec2 uv, vec3 origin, vec3 direction, float range
             if (skip) {
                 hidden = hidden || (bounds.x <= bounds.y && min(z0, z1) > bounds.y + margin);
                 break;
+            }
+            // Reciprocal view depth is affine along the projected segment.
+            // Descend from the first possible overlap with this tile instead
+            // of visiting every smaller tile leading up to its front bound.
+            if (level < 2 && next - cursor > 8.0) {
+                float firstDepth = clamp(z0, bounds.x - margin, bounds.y + margin);
+                if (firstDepth != z0 && abs(slope) > 1e-10) {
+                    float enter = (1.0 / firstDepth - reciprocal) / slope;
+                    if (enter > cursor + 2.0) {
+                        hidden = hidden || z0 > firstDepth;
+                        cursor = min(enter - 0.51, next - 0.001);
+                        samplePixel = start + stepDir * (cursor + 0.001);
+                        pixel = clamp(ivec2(floor(samplePixel)), ivec2(0), ivec2(size) - 1);
+                    }
+                }
             }
         }
         if (!skip) {
