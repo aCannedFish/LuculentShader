@@ -161,13 +161,13 @@ option.MIN_AMBIENT_LIGHT.comment=无天光的矿洞也保留低亮度，已有�
 
 # ---- 画质预设 ----
 profile.LOW=Low（低）
-profile.LOW.comment=调整阴影、云、反射和体积采样预算；彩色光照独立开关。
+profile.LOW.comment=优先流畅，关闭水体折射、GI、彩色光和视差；保留水波、水面倒影、基础阴影与材质高光。
 profile.MID=Mid（中）
-profile.MID.comment=调整阴影、云、反射和体积采样预算；彩色光照独立开关。
+profile.MID.comment=均衡档，开启水体折射、单次GI、32格彩色光范围和基础视差；体积效果使用较低采样。
 profile.HIGH=High（高）
-profile.HIGH.comment=调整阴影、云、反射和体积采样预算；彩色光照独立开关。
+profile.HIGH.comment=画质优先，开启多次GI、48格彩色光范围、更高视差、柔和阴影和云倒影；以约30FPS为目标。
 profile.ULTRA=Ultra（极高）
-profile.ULTRA.comment=调整阴影、云、反射和体积采样预算；彩色光照独立开关。
+profile.ULTRA.comment=提高GI精度、64格彩色光范围、视差、阴影和体积采样；以约30FPS为目标，实际取决于场景与显卡。
 option.shadowMapResolution = 阴影分辨率
 option.shadowDistance = 阴影距离
 option.WATER_REFLECTION_CLOUDS = 倒影体积云

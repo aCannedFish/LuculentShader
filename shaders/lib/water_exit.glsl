@@ -17,6 +17,15 @@ bool waterExitFaceContains(vec3 sampleWorld, vec3 hitWorld, vec3 normal) {
 // on-screen scene geometry with its colour before the viewmodel was drawn.
 vec3 waterExitRadiance(vec2 uv, vec3 interfaceView, vec3 airDirection,
                        out vec2 sourceUv, out bool cameraSource) {
+    // With refraction disabled, the ordinary camera already observes this
+    // direction. Keep the pre-hand source and skip the off-screen ray search.
+    if (WATER_REFRACTION_STRENGTH <= 0.0) {
+        sourceUv = uv;
+        cameraSource = true;
+        vec4 source = texelFetch(colortex15,ivec2(uv * vec2(viewWidth,viewHeight)),0);
+        vec3 radiance = source.a > 0.0 ? source.rgb : underwaterBackgroundColor(uv);
+        return applyTransparentLayer(radiance,waterScreenLayer(uv));
+    }
     vec3 ray = mat3(gbufferModelView) * airDirection;
     vec3 faceNormal;
     WaterFaceHit material;

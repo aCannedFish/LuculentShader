@@ -33,6 +33,11 @@ const int waterGlassSlots = 8192;
 const uint waterGlassMask = 15u << 24u;
 const int waterRecordWords = (waterTotalFaces + waterGlassSlots) * waterFaceWords;
 const int waterIndexWords = waterFarSlots + waterGlassSlots;
+// Actual transparent triangles and their macro lists occupy a separate region.
+// A macro only indexes submitted primitives; its volume never supplies a hit.
+const int waterTriangleSlots = 32768;
+const int waterTriangleNodes = 131072;
+const int waterTriangleWords = waterTriangleSlots * 20 + waterTriangleNodes * 2 + waterMacroCount;
 
 // Separate column masks keep transparent-only queries out of opaque terrain.
 // The last row also contains the lightmap (0..15) and the frame stamp (17).
@@ -51,11 +56,11 @@ bool waterFarInside(ivec3 local) {
 ivec2 waterStorageAddress(int offset) {
     ivec2 size = imageSize(colorimg5);
     int end = (size.y - 1) * size.x;
-    int address = end - waterRecordWords - waterIndexWords - waterMacroCount - waterColumnCount + offset;
+    int address = end - waterRecordWords - waterIndexWords - waterMacroCount - waterColumnCount - waterTriangleWords + offset;
 #if defined(COLOURED_VOLUME_SIZE) && (ENABLE_COLOURED_LIGHTING == 1 || GI_QUALITY > 0)
-    const int profileWidth = COLOURED_VOLUME_SIZE * 8;
+    const int profileWidth = COLOURED_VOLUME_SIZE == 32 ? 512 : COLOURED_VOLUME_SIZE * 8;
 #else
-    const int profileWidth = 256;
+    const int profileWidth = 512;
 #endif
     // A constant divisor avoids integer division for each recorded vertex
     // attribute. Keep the actual allocation authoritative on other layouts.
@@ -82,6 +87,18 @@ ivec2 waterMacroAddress(int index) {
 // A 32-bit mask covers all two-block height bands in a horizontal column.
 ivec2 waterColumnAddress(int index) {
     return waterStorageAddress(waterRecordWords + waterIndexWords + waterMacroCount + index);
+}
+
+ivec2 waterTriangleAddress(int index, int word) {
+    return waterStorageAddress(waterRecordWords + waterIndexWords + waterMacroCount + waterColumnCount + index * 20 + word);
+}
+
+ivec2 waterTriangleLink(int index, int word) {
+    return waterTriangleAddress(waterTriangleSlots, index * 2 + word);
+}
+
+ivec2 waterTriangleHead(int macro) {
+    return waterTriangleLink(waterTriangleNodes, macro);
 }
 
 int waterColumnIndex(ivec3 cell, int side) {

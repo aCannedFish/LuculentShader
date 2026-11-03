@@ -10,7 +10,7 @@
 // Local diffuse transport runs independently of the direct coloured-light switch.
 // Quality controls propagation work per frame; reflectance controls later bounces.
 #define GI_QUALITY 1 // [0 1 2 3]
-#define GI_MULTIBOUNCE 1 // [0 1]
+#define GI_MULTIBOUNCE 0 // [0 1]
 
 // Parenthesized expressions keep this fixed compile-time marker out of the loader option scanner.
 #ifndef SIMPLE_DIMENSION

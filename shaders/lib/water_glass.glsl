@@ -1,43 +1,11 @@
-// Reconstruct the same UV frame as the submitted quad, including rotated
-// and mirrored sprites. The incident air ray supplies the viewing direction
-// even when the glass lies beyond the camera's colour buffer.
-vec4 waterGlassRadiance(WaterFaceHit hit, vec3 normalWorld, vec3 hitView, vec3 view) {
-    vec2 corners[4];
-    vec2 uv = vec2(0.0);
-    vec2 low = vec2(1.0);
-    vec2 high = vec2(0.0);
-    vec3 tint = vec3(0.0);
-    vec2 lm = vec2(0.0);
-    float vertexAlpha = 0.0;
-    for (int i = 0; i < 4; ++i) {
-        corners[i] = unpackUnorm2x16(imageLoad(colorimg5, waterFaceAddress(hit.record, 4 + i)).r);
-        uint data = imageLoad(colorimg5, waterFaceAddress(hit.record, 8 + i)).r;
-        float w = waterCornerWeight(i, hit.localUv);
-        uv += w * corners[i];
-        low = min(low, corners[i]);
-        high = max(high, corners[i]);
-        tint += w * vec3(data & 31u, (data >> 5u) & 63u, (data >> 11u) & 31u) / vec3(31,63,31);
-        uint alpha = ((data >> 16u) & 15u) | ((data >> 24u) & 240u);
-        vertexAlpha += w * float(alpha) / 255.0;
-        lm += w * vec2((data >> 20u) & 15u, (data >> 24u) & 15u);
-    }
-    lm = (lm + 0.5) / 16.0;
-    vec2 du = mix(corners[1] - corners[0], corners[3] - corners[2], hit.localUv.y);
-    vec2 dv = mix(corners[2] - corners[0], corners[3] - corners[1], hit.localUv.x);
-    float det = du.x * dv.y - du.y * dv.x;
-    vec3 along = abs(normalWorld.x) > 0.5 ? vec3(0,0,1) : vec3(1,0,0);
-    vec3 across = abs(normalWorld.y) > 0.5 ? vec3(0,0,1) : vec3(0,1,0);
-    vec3 tangent = mat3(gbufferModelView) * (along * dv.y - across * du.y);
-    vec3 bitangent = mat3(gbufferModelView) * (across * du.x - along * dv.x);
-    vec3 geometric = mat3(gbufferModelView) * normalWorld;
-    tangent = safeNormalize(tangent * sign(det), mat3(gbufferModelView) * along);
-    bitangent = safeNormalize(bitangent * sign(det), cross(geometric, tangent));
-    float footprint = 2.0 * abs(hitView.z * gbufferProjectionInverse[1][1]) / max(viewHeight, 1.0);
-    vec2 gx = du * footprint;
-    vec2 gy = dv * footprint;
+// Shade either an actual triangle or a certified rectangle with the same
+// resource-pack material and original vertex attributes.
+vec4 waterShadeGlass(vec2 uv, vec2 low, vec2 high, vec3 tangent, vec3 bitangent, vec3 geometric,
+                     vec2 gx, vec2 gy, vec3 hitView, vec3 view, vec2 lm, vec3 tint,
+                     float vertexAlpha, bool hasFrame) {
     vec2 inset = min(0.5 / vec2(textureSize(colortex5, 0)), (high - low) * 0.5);
     uv = clamp(uv, low + inset, high - inset);
-    if (length(hitView) <= POM_DISTANCE && abs(det) > 1e-12) {
+    if (length(hitView) <= POM_DISTANCE && hasFrame) {
         vec3 viewTangent = vec3(dot(view,tangent), dot(view,bitangent), dot(view,geometric));
         uv = pbrHeightUv(colortex1, uv, viewTangent, vec4((low + high) * 0.5, (high - low) * 0.5), gx, gy);
     }
@@ -56,6 +24,70 @@ vec4 waterGlassRadiance(WaterFaceHit hit, vec3 normalWorld, vec3 hitView, vec3 v
     vec4 layer = transparentPbrLayer(pbr, normal, tangent, hitView, view, lm, shadow, texel.a * vertexAlpha);
     samplingWaterCaster = false;
     return vec4(layer.rgb * layer.a, layer.a);
+}
+
+// Reconstruct the same UV frame as the submitted quad, including rotated
+// and mirrored sprites. The incident air ray supplies the viewing direction
+// even when the glass lies beyond the camera's colour buffer.
+// Retain the actual diagonal: bilinear weights alter skewed UVs and baked light.
+vec4 waterGlassCornerWeights(vec2 point, uint halves) {
+    float x = point.x;
+    float y = point.y;
+    if (halves == 6u) {
+        return x >= y ? vec4(1.0 - x,x - y,0.0,y) : vec4(1.0 - y,0.0,y - x,x);
+    }
+    if (halves == 9u) {
+        return x + y <= 1.0 ? vec4(1.0 - x - y,x,y,0.0) : vec4(0.0,1.0 - y,1.0 - x,x + y - 1.0);
+    }
+    return vec4(waterCornerWeight(0,point),waterCornerWeight(1,point),
+        waterCornerWeight(2,point),waterCornerWeight(3,point));
+}
+
+vec4 waterGlassRadiance(WaterFaceHit hit, vec3 normalWorld, vec3 hitView, vec3 view) {
+    vec2 corners[4];
+    vec2 uv = vec2(0.0);
+    vec2 low = vec2(1.0);
+    vec2 high = vec2(0.0);
+    vec3 tint = vec3(0.0);
+    vec2 lm = vec2(0.0);
+    float vertexAlpha = 0.0;
+    uint halves = imageLoad(colorimg5,waterFaceAddress(hit.record,12)).r;
+    vec4 weights = waterGlassCornerWeights(hit.localUv,halves);
+    for (int i = 0; i < 4; ++i) {
+        corners[i] = unpackUnorm2x16(imageLoad(colorimg5, waterFaceAddress(hit.record, 4 + i)).r);
+        uint data = imageLoad(colorimg5, waterFaceAddress(hit.record, 8 + i)).r;
+        float w = weights[i];
+        uv += w * corners[i];
+        low = min(low, corners[i]);
+        high = max(high, corners[i]);
+        tint += w * vec3(data & 31u, (data >> 5u) & 63u, (data >> 11u) & 31u) / vec3(31,63,31);
+        uint alpha = ((data >> 16u) & 15u) | ((data >> 24u) & 240u);
+        vertexAlpha += w * float(alpha) / 255.0;
+        lm += w * vec2((data >> 20u) & 15u, (data >> 24u) & 15u);
+    }
+    lm = (lm + 0.5) / 16.0;
+    vec2 du = mix(corners[1] - corners[0], corners[3] - corners[2], hit.localUv.y);
+    vec2 dv = mix(corners[2] - corners[0], corners[3] - corners[1], hit.localUv.x);
+    if (halves == 6u) {
+        du = hit.localUv.x >= hit.localUv.y ? corners[1] - corners[0] : corners[3] - corners[2];
+        dv = hit.localUv.x >= hit.localUv.y ? corners[3] - corners[1] : corners[2] - corners[0];
+    } else if (halves == 9u) {
+        du = hit.localUv.x + hit.localUv.y <= 1.0 ? corners[1] - corners[0] : corners[3] - corners[2];
+        dv = hit.localUv.x + hit.localUv.y <= 1.0 ? corners[2] - corners[0] : corners[3] - corners[1];
+    }
+    float det = du.x * dv.y - du.y * dv.x;
+    vec3 along = abs(normalWorld.x) > 0.5 ? vec3(0,0,1) : vec3(1,0,0);
+    vec3 across = abs(normalWorld.y) > 0.5 ? vec3(0,0,1) : vec3(0,1,0);
+    vec3 tangent = mat3(gbufferModelView) * (along * dv.y - across * du.y);
+    vec3 bitangent = mat3(gbufferModelView) * (across * du.x - along * dv.x);
+    vec3 geometric = mat3(gbufferModelView) * normalWorld;
+    tangent = safeNormalize(tangent * sign(det), mat3(gbufferModelView) * along);
+    bitangent = safeNormalize(bitangent * sign(det), cross(geometric, tangent));
+    float footprint = 2.0 * abs(hitView.z * gbufferProjectionInverse[1][1]) / max(viewHeight, 1.0);
+    vec2 gx = du * footprint;
+    vec2 gy = dv * footprint;
+    return waterShadeGlass(uv,low,high,tangent,bitangent,geometric,gx,gy,
+        hitView,view,lm,tint,vertexAlpha,abs(det) > 1e-12);
 }
 
 // A raster texel at the outline can extend beyond the glass block. When
@@ -102,10 +134,13 @@ float waterGlassRange(vec3 position, vec3 direction, float limit) {
 
 // Composite all certified transparent fronts along the ray, stopping at the
 // selected opaque receiver. Keep a camera-only pane at its measured distance.
+#include "/lib/water_triangles.glsl"
+
 vec4 waterExitLayers(vec3 position, vec3 ray, float limit, WaterRayHit layer) {
     WaterLayers layers = WaterLayers(vec4(0.0), vec4(0.0), -1.0);
     float range = waterGlassRange(position, ray, min(limit, 96.0));
     bool recorded = range > 0.0;
+    if (recorded && waterTrianglesReady()) return waterTriangleLayers(position,ray,range,limit,layer);
     if (layer.distance > 0.0 && layer.distance < limit && !(vGlassUpper.x >= 0.0 && waterGlassOwnsRaster(layer.uv))) {
         layers.screenDistance = layer.distance;
         layers.screenColour = waterScreenLayer(layer.uv);

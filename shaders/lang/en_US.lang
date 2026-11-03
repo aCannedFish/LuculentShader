@@ -166,13 +166,13 @@ option.MIN_AMBIENT_LIGHT.comment=Preserves low visibility in caves without skyli
 
 # ---- Quality presets ----
 profile.LOW=Low
-profile.LOW.comment=Adjusts shadows, clouds, reflections and volumes; colored lighting is independent.
+profile.LOW.comment=Favors responsiveness. Disables water refraction, GI, colored lighting and parallax; retains waves, water reflections, basic shadows and material highlights.
 profile.MID=Mid
-profile.MID.comment=Adjusts shadows, clouds, reflections and volumes; colored lighting is independent.
+profile.MID.comment=Balanced. Enables water refraction, single-bounce GI, a 32-block colored-light volume and basic parallax, with reduced volume sampling.
 profile.HIGH=High
-profile.HIGH.comment=Adjusts shadows, clouds, reflections and volumes; colored lighting is independent.
+profile.HIGH.comment=Favors quality with multibounce GI, a 48-block colored-light volume, higher parallax, soft shadows and reflected clouds. Targets about 30 FPS.
 profile.ULTRA=Ultra
-profile.ULTRA.comment=Adjusts shadows, clouds, reflections and volumes; colored lighting is independent.
+profile.ULTRA.comment=Higher GI precision, a 64-block colored-light volume, parallax, shadows and volume sampling. Targets about 30 FPS, depending on scene and GPU.
 option.shadowMapResolution = Shadow Resolution
 option.shadowDistance = Shadow Distance
 option.WATER_REFLECTION_CLOUDS = Reflected Clouds
