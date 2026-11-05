@@ -24,7 +24,7 @@ int waterFaceRecord(ivec3 cell, int axis, bool negative) {
 // exact keys in a bounded sparse table; an occupied hash slot alone is never
 // evidence of geometry. Coarse occupancy only accelerates empty ray segments.
 #include "/lib/water_storage_layout.glsl"
-const int waterFarSlots = 131072;
+const int waterFarSlots = 98304;
 const int waterTotalFaces = waterFaceCount + waterFarSlots;
 const int waterGlassSlots = 8192;
 const uint waterGlassMask = 15u << 24u;
@@ -119,16 +119,20 @@ int waterFindFace(ivec3 owner, int axis, bool negative, bool create, bool glass)
         + 2 * axis + int(negative) + 1);
     uint hash = (key ^ (key >> 16u)) * 0x7feb352du;
     hash = (hash ^ (hash >> 15u)) * 0x846ca68bu;
-    int slots = glass ? waterGlassSlots : waterFarSlots;
+    // Three equal banks keep power-of-two probing while allowing a smaller
+    // allocation than 131072 slots. The same key always selects the same bank.
+    int slots = glass ? waterGlassSlots : waterFarSlots / 3;
+    int base = glass ? 0 : int(hash % 3u) * slots;
     int home = int((hash ^ (hash >> 16u)) & uint(slots - 1));
     // Adjacent occupied slots used to drop entire cliff faces at moderate
     // load. An odd second hash visits distinct slots in the power-of-two
     // table. Reads still require the exact owner and stop at the first vacancy.
     int stride = int(hash >> 16u) | 1;
     for (int probe = 0; probe < 32; ++probe) {
-        int slot = (home + probe * stride) & (slots - 1);
+        int slot = base + ((home + probe * stride) & (slots - 1));
         ivec2 address = glass ? waterGlassKeyAddress(slot) : waterKeyAddress(slot);
-        uint entry = create ? imageAtomicCompSwap(colorimg5, address, 0u, key) : imageLoad(colorimg5, address).r;
+        uint entry = imageLoad(colorimg5, address).r;
+        if (create && entry == 0u) entry = imageAtomicCompSwap(colorimg5, address, 0u, key);
         if (entry == key || (create && entry == 0u)) return (glass ? waterTotalFaces : waterFaceCount) + slot;
         if (!create && entry == 0u) break;
     }

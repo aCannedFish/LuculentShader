@@ -1556,6 +1556,7 @@ vec2 estimateWaterMedium(sampler2D surfaces, sampler2D parameters) {
 
 
 
+out float vWaterRestHeight;
 void main() {
     float alias = mc_Entity.x;
     if (alias >= 6000.0 && alias <= 6010.0) {
@@ -1566,14 +1567,18 @@ void main() {
     // vec4(vaPosition + modelOffset, 1.0) 是只读的顶点属性，先复制再修改。
     vec3 displacedPosition = vec4(vaPosition + modelOffset, 1.0).xyz;
 
-#if ENABLE_WATER_WAVES == 1
     // 转成绝对世界坐标再取相位，波浪才不会跟着玩家跑（见 lib/water.glsl 的说明）。
     vec3 playerPos = (gbufferModelViewInverse * modelViewMatrix * vec4(vaPosition + modelOffset, 1.0)).xyz;
+    vWaterRestHeight = playerPos.y;
+#if ENABLE_WATER_WAVES == 1
     vec2 worldXZ = (playerPos + cameraPosition).xz;
 
     // 只在竖直方向上做位移。水平方向不动，避免水体出现"缝"。
-    if (abs(legacyEntity.x - WATER_BLOCK_ID) < 0.5 && vaNormal.y > 0.9) {
-        displacedPosition.y += getWaterWaveHeight(worldXZ, frameTimeCounter);
+    float localHeight = fract(playerPos.y + cameraPosition.y + 0.0001);
+    if (abs(legacyEntity.x - WATER_BLOCK_ID) < 0.5 && (vaNormal.y > 0.9 || localHeight > 0.01)) {
+        float pixelAngle = 2.0 * abs(gbufferProjectionInverse[1][1]) / max(viewHeight, 1.0);
+        float resolved = isEyeInWater == 0 ? waterResolvedWave(length(playerPos), playerPos.y, pixelAngle) : 1.0;
+        displacedPosition.y += getWaterWaveHeight(worldXZ, frameTimeCounter) * resolved;
     }
 #endif
 

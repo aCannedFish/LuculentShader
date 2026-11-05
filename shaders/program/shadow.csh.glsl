@@ -5,11 +5,11 @@ layout(r32ui, binding=5) uniform uimage2D colorimg5;
 #include "/lib/water_face_cache.glsl"
 #include "/lib/water_plant_surface.glsl"
 layout(local_size_x=256) in;
-// Cover all 229376 opaque face slots, or the larger 96-cell lighting volume.
+// Cover all 196608 opaque face slots, or the larger 96-cell lighting volume.
 #if (ENABLE_COLOURED_LIGHTING == 1 || GI_QUALITY > 0) && COLOURED_VOLUME_SIZE == 96
 const ivec3 workGroups = ivec3(1728, 1, 1);
 #else
-const ivec3 workGroups = ivec3(896, 1, 1);
+const ivec3 workGroups = ivec3(768, 1, 1);
 #endif
 void main() {
 #if SIMPLE_DIMENSION == 0

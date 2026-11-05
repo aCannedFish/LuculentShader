@@ -1140,6 +1140,14 @@ layout(r32ui, binding=5) uniform uimage2D colorimg5;
 void waterCaptureFace(vec3 centre, vec3 normal, bool glass) {
 #if SIMPLE_DIMENSION == 0 && ENABLE_SHADOWS == 1
     if (renderStage != 8 && renderStage != 9 && !glass) return;
+    // Far bank fronts and overhangs remain useful even to a nearby mirror.
+    // Reserve sparse slots by omitting far wall backs and upward faces above
+    // the eye, which an ascending reflected ray from below cannot enter.
+    vec3 toEye = cameraPosition - centre;
+    if (isEyeInWater == 0 && dot(toEye, toEye) > 32.0 * 32.0) {
+        if (abs(normal.y) < 0.01 && dot(normal, toEye) < -6.0) return;
+        if (normal.y > 0.99 && toEye.y < -2.0) return;
+    }
     ivec3 owner = ivec3(floor(centre));
     ivec3 cell = owner - waterFarOrigin();
     if (!waterFarInside(cell)) return;
@@ -1221,14 +1229,14 @@ void main() {
 #if GI_QUALITY > 0
     vec3 lpvAlbedo = textureLod(gtexture, mc_midTexCoord, 2.0).rgb * vaColor.rgb;
     lpvAlbedo = pow(max(lpvAlbedo, vec3(0.0)), vec3(2.2));
-    lpvCaptureSurface(lpvCentre, int(round(mc_Entity.x)), lpvAlbedo,
+    lpvCaptureSurface(lpvCentre, mc_Entity.x == 106.0 ? 100 : int(round(mc_Entity.x)), lpvAlbedo,
         clamp(float(vaUV2.y) / 240.0, 0.0, 1.0));
 #else
-    lpvCaptureVertex(lpvCentre, int(round(mc_Entity.x)));
+    lpvCaptureVertex(lpvCentre, mc_Entity.x == 106.0 ? 100 : int(round(mc_Entity.x)));
 #endif
 #endif
 
-    float alias = mc_Entity.x;
+    float alias = mc_Entity.x == 106.0 ? 100.0 : mc_Entity.x;
     if (alias >= 6000.0 && alias <= 6010.0) {
         alias = alias == 6000.0 || alias == 6003.0 || alias == 6010.0 ? 101.0 : 102.0;
     }

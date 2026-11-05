@@ -6,7 +6,7 @@ layout(location=3) out vec4 fullOut3;
 layout(location=4) out vec4 fullOut4;
 /* composite2.fsh: sky, water optics and depth-aware volume reconstruction. */
 #ifdef WATER_TRANSMISSION_PASS
-/* RENDERTARGETS: 7 */
+/* RENDERTARGETS: 7,15 */
 #else
 /* RENDERTARGETS: 0 */
 #endif
@@ -2264,7 +2264,9 @@ vec4 traceVolumetricCloudsLit(vec3 origin, vec3 ray, float limit, bool reflectio
     ambient += vec3(0.060, 0.020, 0.009) * atmosphereTwilight();
     ambient = mix(ambient, vec3(luma(ambient)) * vec3(0.90, 0.95, 1.0) * 0.70,
                   weatherRainAmount());
-    float jitter = cloudCellHash(floor(gl_FragCoord.xy));
+    // Neighbouring mirror pixels see the same cloud volume. A shared midpoint
+    // keeps the 16-step cloud estimate coherent as the reflected image moves.
+    float jitter = reflection ? 0.5 : cloudCellHash(floor(gl_FragCoord.xy));
     vec3 accumulated = vec3(0.0);
     float transmission = 1.0;
     float previous = entry;
@@ -4361,11 +4363,35 @@ vec3 waterEnvironment(vec3 originWorld, vec3 rayWorld, float skyVisibility, bool
         sky += skyCelestialRadiance(rayWorld);
     }
 #if WATER_REFLECTION_CLOUDS == 1
-    vec4 cloud = traceVolumetricCloudsFrom(originWorld, rayWorld, CLOUD_DISTANCE, true);
+    // The sky strip already integrates clouds from the eye. Only integrate
+    // them again when the reflected ray origin produces discernible parallax.
+    float cloudRange = max(abs(CLOUD_HEIGHT - originWorld.y), 1.0) / max(rayWorld.y, 0.001);
+    float parallax = length(originWorld - cameraPosition) / cloudRange;
+    float detail = smoothstep(0.012, 0.035, parallax);
+    vec4 cloud = cloudEnvironment(rayWorld);
+    if (detail > 0.0) cloud = mix(cloud, traceVolumetricCloudsFrom(originWorld, rayWorld, CLOUD_DISTANCE, true), detail);
 #else
     vec4 cloud = cloudEnvironment(rayWorld);
 #endif
     return (cloud.rgb + sky * (1.0 - cloud.a)) * skyVisibility;
+}
+
+// A thin cascade in front of a rock face already has native premultiplied
+// colour. Include it when the camera depth places the two surfaces together.
+vec3 waterBankLayer(vec2 uv, vec3 backing, vec3 mirror) {
+    vec4 layer = waterScreenLayer(uv);
+    if (layer.a <= 0.001) return backing;
+    ivec2 size = textureSize(depthtex0, 0);
+    ivec2 pixel = clamp(ivec2(uv * vec2(size)), ivec2(0), size - 1);
+    vec2 centre = (vec2(pixel) + 0.5) / vec2(size);
+    vec3 front = screenToView(centre, texelFetch(depthtex0, pixel, 0).r);
+    vec3 solid = screenToView(centre, texelFetch(depthtex1, pixel, 0).r);
+    vec4 surface = texelFetch(colortex9, pixel, 0);
+    if (surface.a > 0.5 && surface.b <= -front.z + 0.02) return backing;
+    vec3 up = mat3(gbufferModelView) * vec3(0.0, 1.0, 0.0);
+    if (dot(front - mirror, up) < -0.03) return backing;
+    float close = 1.0 - smoothstep(1.0, 2.0, length(solid - front));
+    return mix(backing, applyTransparentLayer(backing, layer), close);
 }
 
 // Query unweighted reflected radiance before the water BRDF and air medium.
@@ -4395,21 +4421,23 @@ vec4 queryWaterRadiance(vec3 position, vec3 direction, float roughness, float sk
             if (waterCameraSees(point, witness)) {
                 radiance = filteredWaterReflection(witness, distance,
                     reflectionSceneDepth(depthtex1, witness), roughness).rgb;
+                radiance = waterBankLayer(witness, radiance, position);
             } else if (nativeHit) {
                 radiance = waterLightFace(material, faceNormal, point);
             } else {
                 radiance = waterCasterRadiance(sunPixel, point).rgb;
             }
-            return vec4(reflectionAirMedium(radiance, distance, direction), 1.0);
+            return vec4(reflectionAirMedium(radiance, distance, direction), distance);
         }
     }
     if (visible) {
         vec4 sampleColor = filteredWaterReflection(hit.uv, hit.distance,
             reflectionSceneDepth(depthtex1, hit.uv), roughness);
-        if (sampleColor.a > 0.0) return vec4(reflectionAirMedium(sampleColor.rgb, hit.distance, direction), 1.0);
+        sampleColor.rgb = waterBankLayer(hit.uv, sampleColor.rgb, position);
+        if (sampleColor.a > 0.0) return vec4(reflectionAirMedium(sampleColor.rgb, hit.distance, direction), hit.distance);
     }
     vec3 rayWorld = mat3(gbufferModelViewInverse) * direction;
-    return vec4(waterEnvironment(originWorld, rayWorld, reflectionSkyLightWeight(skyLevel), false), 1.0);
+    return vec4(waterEnvironment(originWorld, rayWorld, reflectionSkyLightWeight(skyLevel), false), -1.0);
 }
 
 // Reproject only the footprint of an already resolved visible receiver. The
@@ -4674,7 +4702,9 @@ vec3 waterInterfaceNormal(vec3 position, vec3 originWorld, float sky) {
     // 水底变浅与波浪偏折均来自下方同一次 Snell 求解，不额外变换水底深度。
     vec3 opticalNormal = vec3(0.0, 1.0, 0.0);
 #if ENABLE_WATER_WAVES == 1
-    opticalNormal = getWaterWaveNormal(originWorld.xz, frameTimeCounter);
+    float pixelAngle = 2.0 * abs(gbufferProjectionInverse[1][1]) / max(viewHeight, 1.0);
+    float resolved = waterResolvedWave(length(position), originWorld.y - cameraPosition.y, pixelAngle);
+    opticalNormal = normalize(mix(opticalNormal, getWaterWaveNormal(originWorld.xz, frameTimeCounter), resolved));
 #endif
     float footprint = 2.0 * abs(gbufferProjectionInverse[1][1]) * length(position)
         / (max(viewHeight, 1.0) * max(abs(dot(normalize(position),
@@ -4684,6 +4714,9 @@ vec3 waterInterfaceNormal(vec3 position, vec3 originWorld, float sky) {
     return mat3(gbufferModelView)
         * normalize(opticalNormal + vec3(-rainSlope.x, 0.0, -rainSlope.y));
 }
+
+uniform sampler2D colortex15;
+#include "/lib/water_distant.glsl"
 
 // 折射改变水底的投影位置；吸收仍由采样处的真实水内距离决定。
 vec3 applyWaterReflection(vec3 color, vec2 uv, float normalVariance) {
@@ -4698,25 +4731,23 @@ vec3 applyWaterReflection(vec3 color, vec2 uv, float normalVariance) {
 
     vec3 opticalNormal = waterInterfaceNormal(position, originWorld, surface.b);
     vec4 bed = texelFetch(colortex7, ivec2(gl_FragCoord.xy), 0);
-    vec3 transmitted = waterResolveBed(uv, position, opticalNormal, bed);
+    float lod = distantWaterBlend(position);
+    vec3 farBed = vec3(0.0);
+    vec3 farReflection = vec3(0.0);
+    vec4 farSolid = vec4(0.0);
+    bool hasSharedSample = lod > 0.0 && readDistantWater(position, true, farBed, farReflection, farSolid);
+    if (!hasSharedSample) lod = 0.0;
+    float mirrorLod = lod;
+    vec3 transmitted = farBed;
+    if (lod < 1.0) transmitted = mix(waterResolveBed(uv, position, opticalNormal, bed), farBed, lod);
     vec3 reflected = vec3(0.0);
     float roughness = sqrt(sqrt(pow4(WATER_ROUGHNESS) + min(2.0 * normalVariance, 0.035)));
     float coherence = 1.0 / (1.0 + roughness);
     vec3 geometricNormal = normalize(mat3(gbufferModelView) * vec3(0.0, 1.0, 0.0));
     // 水下窗口需要清晰的波浪起伏；水上倒影使用更平缓的光学斜率，
     // 避免同一组放大法线把相邻倒影拉成相互交叠的碎片。
-    vec3 reflectionNormal = opticalNormal;
-#if ENABLE_WATER_WAVES == 1
-    // Short crests also bend the coherent image slightly. Bound their tilt
-    // smoothly (about one degree at default strength) so distant cutouts
-    // keep their outline. Fade this extra tilt toward the horizon.
-    vec3 ripple = normal - opticalNormal;
-    float tiltLimit = 0.012 * WATER_WAVE_STRENGTH
-        * smoothstep(0.0, 0.16, dot(geometricNormal, -incident));
-    reflectionNormal = normalize(opticalNormal + ripple
-        * (tiltLimit / (0.10 + length(ripple))));
-#endif
-    vec3 direction = normalize(reflect(incident, reflectionNormal));
+    vec3 reflectionNormal = waterMirrorNormal(position, opticalNormal, normal, distantWaterBlend(position));
+    vec3 direction = waterAirDirection(position, reflectionNormal);
     float visibility = reflectionGeometricVisibility(dot(geometricNormal, -incident),
         dot(geometricNormal, direction), roughness);
     // The captured normal already combines the long waves with the ripples
@@ -4724,12 +4755,32 @@ vec3 applyWaterReflection(vec3 color, vec2 uv, float normalVariance) {
     float weight = waterFresnel(dot(normal, -incident), roughness)
         * WATER_REFLECTION_STRENGTH * visibility;
     if (dot(reflectionNormal, -incident) <= 0.0) weight = 0.0;
+    // An unresolved water surface approaches unit Fresnel at the horizon.
+    // Individual crests there cannot switch whole pixels to dark transmission.
+    float viewCosine = max(dot(geometricNormal, -incident), 0.0);
+    float horizon = 1.0 - smoothstep(0.035, 0.095, viewCosine);
+    weight = mix(weight, waterFresnel(viewCosine) * WATER_REFLECTION_STRENGTH, horizon);
     if (weight > 0.001) {
-        vec4 radiance = vec4(0.0);
-        if (radiance.a <= 0.0) {
-            radiance = queryWaterRadiance(position, direction, roughness, surface.b);
+        reflected = farReflection;
+        if (lod < 1.0) {
+            vec4 detailed = queryWaterRadiance(position, direction, roughness, surface.b);
+            // Nearby water may mirror a distant roof. Filter that image by
+            // receiver distance independently of the nearby refracted bed.
+            float receiverRange = detailed.a < 0.0 ? far : detailed.a;
+            float distantReceiver = smoothstep(8.0, 15.0, length(position)) * smoothstep(36.0, 72.0, receiverRange);
+            if (distantReceiver > lod) {
+                if (!hasSharedSample) hasSharedSample = readDistantWater(position, false, farBed, farReflection, farSolid);
+                if (hasSharedSample && detailed.a < 0.0) {
+                    mirrorLod = distantReceiver;
+                } else if (hasSharedSample && farSolid.a > 0.1) {
+                    // Keep the coverage of a confirmed fine ray. Only geometry
+                    // colours may soften its distant receiver at a sky boundary.
+                    detailed.rgb = mix(detailed.rgb, farSolid.rgb, distantReceiver);
+                }
+            }
+            reflected = mix(detailed.rgb, farReflection, mirrorLod);
         }
-        reflected = radiance.rgb * WATER_REFLECTION_BRIGHTNESS;
+        reflected *= WATER_REFLECTION_BRIGHTNESS;
     }
     // 倒影直接与透射混合：夜晚、雨天的天空暗而灰，水面也随之变暗、变灰。
     vec3 result = mix(transmitted, reflected, weight);
@@ -4857,7 +4908,6 @@ vec2 waterWaveOctave(vec2 position, float time, float angle, float wavelength,
 #endif
 
 
-uniform sampler2D colortex15;
 uniform sampler2D depthtex2;
 SIMPLE_VARYING vec3 vUnderwaterTint;
 SIMPLE_VARYING vec3 vUnderwaterScatter;
@@ -5475,6 +5525,7 @@ void main() {
     ivec2 pixel = ivec2(gl_FragCoord.xy);
     vec2 uv = gl_FragCoord.xy / vec2(viewWidth, viewHeight);
     vec4 surface = waterSurfaceAtPixel(colortex9, ivec2(gl_FragCoord.xy));
+    fullOut1 = vec4(0.0);
     if (isEyeInWater == 1) {
         fullOut0 = applyUnderwaterOptics(uv);
         return;
@@ -5484,10 +5535,34 @@ void main() {
         return;
     }
     vec3 position = waterSurfacePosition(uv, surface.a);
+    float lod = distantWaterBlend(position);
+    ivec2 last = textureSize(colortex9, 0) - 1;
+    ivec2 anchor = distantWaterAnchor(pixel / distantWaterStride, last);
+    bool representative = all(equal(pixel, anchor));
+    if (lod >= 1.0 && !representative && distantWaterSupports(anchor, position)) {
+        fullOut0 = vec4(0.0);
+        return;
+    }
     vec3 normal = waterInterfaceNormal(position, viewToAbsoluteWorld(position), surface.b);
+    if (representative && (lod > 0.0 || length(position) > 8.0)) {
+        vec3 representativeNormal = waterMirrorNormal(position, normal, decodeWaterNormal(surface.xy), lod);
+        vec3 direction = waterAirDirection(position, representativeNormal);
+        vec4 sampleValue = vec4(0.0, 0.0, 0.0, -1.0);
+        if (WATER_REFLECTION_STRENGTH > 0.0) {
+            sampleValue = distantWaterRadiance(position, direction, surface.b);
+        }
+        fullOut1 = vec4(sampleValue.rgb, sign(sampleValue.a) * surface.a);
+    }
     vec4 scattering = texelFetch(colortex7, pixel, 0);
+    if (lod >= 1.0) {
+        fullOut0 = vec4(distantWaterBed(uv, position, normal, scattering.rgb), 0.0);
+        return;
+    }
     float tag;
     vec3 colour = transmitWaterSample(uv, position, normal, surface, scattering, tag);
+    if (representative && lod > 0.0) {
+        colour = mix(colour, distantWaterBed(uv, position, normal, scattering.rgb), lod);
+    }
     fullOut0 = vec4(colour, tag);
 }
 #else
@@ -5527,7 +5602,8 @@ void main() {
 #if DEBUG_VIEW != 0
         backgroundTransmission = 1.0;
 #endif
-    } else if (backgroundTransmission >= 0.99999) {
+    } else if (backgroundTransmission >= 0.99999 && depth >= 0.999999
+               && waterScreenLayer(screenCoord).a <= 0.001) {
         // 天空已经在 deferred1 填好；雨丝覆盖处保留混合结果，避免再次覆盖雨幕。
         color = fillSkyBackground(color, screenCoord, depth);
     }

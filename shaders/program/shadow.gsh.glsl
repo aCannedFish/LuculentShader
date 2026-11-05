@@ -152,7 +152,8 @@ void capturePlantWaterSurface() {
         getWaterWaveHeight(cell + vec2(1.0, 0.0), frameTimeCounter));
     wave = min(wave, getWaterWaveHeight(cell + vec2(0.0, 1.0), frameTimeCounter));
     wave = min(wave, getWaterWaveHeight(cell + vec2(1.0), frameTimeCounter));
-    height += wave;
+    // Distant crests converge to the fluid rest height as their footprint grows.
+    height += min(wave, 0.0);
 #endif
     imageAtomicMax(colorimg5, waterPlantAddress(index), floatBitsToUint(height + 4096.0));
 #endif

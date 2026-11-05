@@ -3303,11 +3303,46 @@ vec3 computePbrLighting(LabPbrMaterial pbr, vec3 normal, vec2 lightmap, vec3 sha
 
 uniform sampler2D colortex6;
 uniform sampler2D depthtex1;
+in float vWaterRestHeight;
+
+// Thin streams use their actual raster plane, including vertical walls and
+// undersides. Advect the variation downhill in that plane to connect each fall.
+vec4 waterStreamLayer(vec3 world, vec3 face, vec3 view, vec3 illumination, vec3 nativeColour,
+                      vec3 biome, float coverage, float daylight, float footprint) {
+    vec3 downhill = vec3(0.0, -1.0, 0.0) + face * face.y;
+    downhill = safeNormalize(downhill, vec3(1.0, 0.0, 0.0));
+    vec3 across = safeNormalize(cross(face, downhill), vec3(0.0, 0.0, 1.0));
+    vec2 phase = vec2(dot(world, across) * 3.0, dot(world, downhill) * 0.9 - frameTimeCounter * 0.9);
+    float streak = waterValueNoise(phase).x * (1.0 - smoothstep(0.12, 0.55, footprint));
+    float cosine = clamp(abs(dot(face, view)), 0.0, 1.0);
+    // A thin sheet primarily attenuates the background equally in RGB. Use
+    // the pond's scattering palette only for the small in-scattered term.
+    float thickness = (0.11 + 0.24 * WATER_SURFACE_OPACITY) * mix(1.45, 1.0, cosine);
+    thickness *= 1.0 + 0.16 * streak;
+    float absorption = 1.0 - exp(-thickness);
+    vec3 scatter = waterScatteringAlbedo(biome) * illumination * 0.22 * nativeColour;
+    float sheen = (0.003 + 0.035 * waterFresnel(cosine)) * daylight;
+    vec3 sky = toLinearSpace(skyColor);
+    vec3 highlight = mix(vec3(luma(sky)), sky, 0.10);
+    float opacity = absorption * (1.0 - sheen) + sheen;
+    vec3 radiance = scatter * absorption * (1.0 - sheen) + highlight * sheen;
+    return vec4(radiance / max(opacity, 0.0001), clamp(coverage * opacity, 0.0, 1.0));
+}
 
 void main() {
     vec3 worldPosition = viewToAbsoluteWorld(vViewPos);
     float waveFootprint = max(length(dFdx(worldPosition.xz)), length(dFdy(worldPosition.xz)));
-    bool water = abs(vEntityId.x - WATER_BLOCK_ID) < 0.5;
+    bool movingFluid = abs(vEntityId.x - 106.0) < 0.5;
+    bool water = abs(vEntityId.x - WATER_BLOCK_ID) < 0.5 || movingFluid;
+    vec3 dx = mat3(gbufferModelViewInverse) * dFdx(vViewPos);
+    vec3 dy = mat3(gbufferModelViewInverse) * dFdy(vViewPos);
+    dx.y = dFdx(vWaterRestHeight);
+    dy.y = dFdy(vWaterRestHeight);
+    // The area of a pixel on a flow face shrinks near the eye. Normalise the
+    // edges first so close vertical faces keep their orientation.
+    vec3 rasterFace = safeNormalize(cross(dx / max(length(dx), 1e-12), dy / max(length(dy), 1e-12)),
+        vec3(0.0, 1.0, 0.0));
+    float streamFootprint = max(length(dx), length(dy));
     vec2 materialUv = water ? vTexCoord : pbrParallaxUv(vTexCoord, vViewPos,
         safeNormalize(vNormalView, vec3(0.0, 1.0, 0.0)), vPbrTile);
     vec4 texel = texture(gtexture, materialUv);
@@ -3331,8 +3366,10 @@ void main() {
     }
 
     vec3 normalView = water ? geometricNormal : mappedNormal;
-    vec3 faceNormalWorld = mat3(gbufferModelViewInverse) * normalView;
-    bool topSurface = water && abs(faceNormalWorld.y) > 0.9;
+    bool horizontal = abs(rasterFace.y) > 0.9998;
+    bool topSurface = water && horizontal && (isEyeInWater == 1 || (!movingFluid && rasterFace.y > 0.0));
+    bool stream = water && !topSurface;
+    if (stream) normalView = mat3(gbufferModelView) * rasterFace;
     if (topSurface) {
         vec3 waveNormalWorld = vec3(0.0, 1.0, 0.0);
 #if ENABLE_WATER_WAVES == 1
@@ -3364,7 +3401,20 @@ void main() {
     float directVisibility = shadow * directSky;
     vec3 color;
     vec3 scatteringRadiance = vec3(0.0);
-    if (water) {
+    if (stream) {
+        vec3 illumination = waterDiffuse(vec3(1.0), normalView, lmCoord, directVisibility, vViewPos);
+        vec3 view = normalize(mat3(gbufferModelViewInverse) * -vViewPos);
+        vec4 layer = waterStreamLayer(worldPosition, rasterFace, view, illumination, texel.rgb,
+            vColor.rgb, albedo.a, skyVisibility, streamFootprint);
+        // On rock the small amount of in-scattering must not turn a dark
+        // backing into a luminous blue sheet. Keep the transmitted rock hue.
+        vec4 backing = texelFetch(colortex6, ivec2(gl_FragCoord.xy), 0);
+        if (backing.a > 0.5) layer.rgb = min(layer.rgb, backing.rgb * 0.45);
+        // The backing has already travelled through the camera fog. Fade the
+        // film's contrast with distance so it does not add a second fog colour.
+        color = layer.rgb;
+        albedo.a = layer.a * (1.0 - getFogFactor(viewDistance));
+    } else if (water) {
         color = waterDiffuse(albedo.rgb, normalView, lmCoord, directVisibility, vViewPos);
         scatteringRadiance = color;
         albedo.a *= WATER_SURFACE_OPACITY;
@@ -3383,7 +3433,7 @@ void main() {
     }
 
     // 光学密度保存在 colortex7，低 alpha 不能让加载器丢掉水面几何数据。
-    float outputAlpha = water ? max(albedo.a, alphaTestRef) : albedo.a;
+    float outputAlpha = topSurface ? max(albedo.a, alphaTestRef) : albedo.a;
     writeGBuffers(color, normalView, lmCoord, shadow, water ? MAT_WATER : MAT_SOLID, outputAlpha);
     // 水面数据以二值 alpha 替换，玻璃输出零值并保留它；玻璃颜色另存预乘层。
     // 线性深度位于 B，alpha 专门用于覆盖标记，避免透明混合破坏水面深度。
@@ -3394,9 +3444,10 @@ void main() {
     // Below water the scatter attachment is free. Associate the transmitted
     // transparent layer with the actual raster plane which wrote its colour.
     if (isEyeInWater == 1) {
-        if (!water && outputAlpha > 0.001) {
-            vec2 plane = encodeWaterNormal(geometricNormal);
-            vec3 axes = abs(mat3(gbufferModelViewInverse) * geometricNormal);
+        if (!topSurface && outputAlpha > 0.001) {
+            vec3 layerNormal = stream ? normalView : geometricNormal;
+            vec2 plane = encodeWaterNormal(layerNormal);
+            vec3 axes = abs(mat3(gbufferModelViewInverse) * layerNormal);
             int axis = axes.x > max(axes.y, axes.z) ? 0 : (axes.y > axes.z ? 1 : 2);
             float coordinate = worldPosition[axis] - floor(cameraPosition[axis]);
             float gridPlane = round(coordinate * 16.0) / 16.0;
@@ -3407,7 +3458,7 @@ void main() {
         }
     }
     fullOut1 = topSurface ? vec4(skyVisibility, albedo.a, 0.0, 1.0) : vec4(0.0);
-    fullOut2 = water ? vec4(0.0) : vec4(color * outputAlpha, outputAlpha);
+    fullOut2 = topSurface ? vec4(0.0) : vec4(color * outputAlpha, outputAlpha);
 #endif
 }
 
