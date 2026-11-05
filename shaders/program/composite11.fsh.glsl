@@ -4373,7 +4373,8 @@ vec3 waterEnvironment(vec3 originWorld, vec3 rayWorld, float skyVisibility, bool
 vec4 queryWaterRadiance(vec3 position, vec3 direction, float roughness, float skyLevel) {
     vec3 originWorld = viewToAbsoluteWorld(position);
     vec2 uv = waterProjectPixel(position, vec2(1.0));
-    WaterRayHit hit = traceWaterGeometry(uv, position, direction, far, depthtex1);
+    WaterRayHit unusedLayer;
+    WaterRayHit hit = traceWaterGeometry(uv, position, direction, far, depthtex1, false, true, unusedLayer);
     bool visible = hit.distance > 0.0 && !waterReflectionSubmerged(hit.uv, position);
     float maximum = visible ? max(hit.distance - 0.05, 0.0) : far;
     if (!visible || hit.hidden) {
@@ -4385,7 +4386,7 @@ vec4 queryWaterRadiance(vec3 position, vec3 direction, float roughness, float sk
         vec3 faceNormal;
         WaterFaceHit material;
         bool nativeHit = waterNearFaceHit(position, direction,
-            min(sunHit ? sunDistance + 0.015 : maximum, 96.0), faceDistance, faceNormal, material);
+            min(sunHit ? sunDistance + 0.015 : maximum, far), faceDistance, faceNormal, material);
         if (nativeHit || sunHit) {
             float distance = nativeHit ? faceDistance : sunDistance;
             vec3 point = position + direction * distance;

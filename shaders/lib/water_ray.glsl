@@ -69,7 +69,7 @@ WaterRayHit waterCreaseHit(ivec2 pixel, vec3 point, vec3 normal, int mask,
 }
 
 WaterRayHit traceWaterGeometry(vec2 uv, vec3 origin, vec3 direction, float range, sampler2D depths,
-                               bool preHand, out WaterRayHit transparent) {
+                               bool preHand, bool airReflection, out WaterRayHit transparent) {
     transparent = WaterRayHit(uv, -1.0, false);
     vec2 size = vec2(textureSize(depths, 0));
     if (direction.z > 0.001) range = min(range, (-near * 1.02 - origin.z) / direction.z);
@@ -176,6 +176,13 @@ WaterRayHit traceWaterGeometry(vec2 uv, vec3 origin, vec3 direction, float range
                 vec2 centre = (vec2(pixel) + 0.5) / size;
                 vec3 point = screenToView(centre, depth);
                 float flags = texelFetch(colortex6, pixel, 0).a;
+                // At long range a cutout texel's support can cross the water
+                // plane. Continue past submerged leaves to the actual backing.
+                if (airReflection && flags >= 4.5) {
+                    hidden = true;
+                    cursor = max(next, cursor + 0.001);
+                    continue;
+                }
                 // The pre-hand receiver behind the held item has its own
                 // depth but cannot borrow the item's later face tag.
                 if (preHand && texelFetch(depthtex1, pixel, 0).r != depth) flags = 0.0;
@@ -221,7 +228,7 @@ WaterRayHit traceWaterGeometry(vec2 uv, vec3 origin, vec3 direction, float range
 
 WaterRayHit traceWaterGeometry(vec2 uv, vec3 origin, vec3 direction, float range, sampler2D depths) {
     WaterRayHit unused;
-    return traceWaterGeometry(uv, origin, direction, range, depths, false, unused);
+    return traceWaterGeometry(uv, origin, direction, range, depths, false, false, unused);
 }
 
 // At a disocclusion or the edge of the viewport only part of the estimated

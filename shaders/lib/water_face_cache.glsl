@@ -23,21 +23,13 @@ int waterFaceRecord(ivec3 cell, int axis, bool negative) {
 // Keep the dense waterbed records near the eye. Farther native faces use
 // exact keys in a bounded sparse table; an occupied hash slot alone is never
 // evidence of geometry. Coarse occupancy only accelerates empty ray segments.
-const ivec3 waterFarSize = ivec3(128, 64, 128);
-const ivec3 waterMacroSize = ivec3(32, 16, 32);
-const int waterFarSlots = 65536;
-const int waterMacroCount = 16384;
-const int waterColumnCount = 1088;
+#include "/lib/water_storage_layout.glsl"
+const int waterFarSlots = 131072;
 const int waterTotalFaces = waterFaceCount + waterFarSlots;
 const int waterGlassSlots = 8192;
 const uint waterGlassMask = 15u << 24u;
 const int waterRecordWords = (waterTotalFaces + waterGlassSlots) * waterFaceWords;
 const int waterIndexWords = waterFarSlots + waterGlassSlots;
-// Actual transparent triangles and their macro lists occupy a separate region.
-// A macro only indexes submitted primitives; its volume never supplies a hit.
-const int waterTriangleSlots = 32768;
-const int waterTriangleNodes = 131072;
-const int waterTriangleWords = waterTriangleSlots * 20 + waterTriangleNodes * 2 + waterMacroCount;
 
 // Separate column masks keep transparent-only queries out of opaque terrain.
 // The last row also contains the lightmap (0..15) and the frame stamp (17).
@@ -84,7 +76,7 @@ ivec2 waterMacroAddress(int index) {
     return waterStorageAddress(waterRecordWords + waterIndexWords + index);
 }
 
-// A 32-bit mask covers all two-block height bands in a horizontal column.
+// A 32-bit mask covers all height bands in a horizontal column.
 ivec2 waterColumnAddress(int index) {
     return waterStorageAddress(waterRecordWords + waterIndexWords + waterMacroCount + index);
 }
@@ -102,7 +94,7 @@ ivec2 waterTriangleHead(int macro) {
 }
 
 int waterColumnIndex(ivec3 cell, int side) {
-    return (side == 16 ? 1024 : 0) + cell.x / side + (128 / side) * (cell.z / side);
+    return (side == 16 ? waterSmallColumns : 0) + cell.x / side + (waterFarSize.x / side) * (cell.z / side);
 }
 
 int waterMacroIndex(ivec3 local) {
@@ -129,8 +121,12 @@ int waterFindFace(ivec3 owner, int axis, bool negative, bool create, bool glass)
     hash = (hash ^ (hash >> 15u)) * 0x846ca68bu;
     int slots = glass ? waterGlassSlots : waterFarSlots;
     int home = int((hash ^ (hash >> 16u)) & uint(slots - 1));
-    for (int probe = 0; probe < 8; ++probe) {
-        int slot = (home + probe) & (slots - 1);
+    // Adjacent occupied slots used to drop entire cliff faces at moderate
+    // load. An odd second hash visits distinct slots in the power-of-two
+    // table. Reads still require the exact owner and stop at the first vacancy.
+    int stride = int(hash >> 16u) | 1;
+    for (int probe = 0; probe < 32; ++probe) {
+        int slot = (home + probe * stride) & (slots - 1);
         ivec2 address = glass ? waterGlassKeyAddress(slot) : waterKeyAddress(slot);
         uint entry = create ? imageAtomicCompSwap(colorimg5, address, 0u, key) : imageLoad(colorimg5, address).r;
         if (entry == key || (create && entry == 0u)) return (glass ? waterTotalFaces : waterFaceCount) + slot;

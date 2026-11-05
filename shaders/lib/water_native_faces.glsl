@@ -123,14 +123,14 @@ vec4 waterOwnedColour(vec3 hitView, vec3 surfaceNormal) {
 // In an empty height band, advance to the next recorded band or the column
 // boundary. Ascending, descending and horizontal rays use the same occupancy.
 bool waterColumnGap(uint mask, int y, int stepY, out int edge) {
-    int band = y >> 1;
+    int band = y / waterHeightBand;
     if ((mask & (1u << uint(band))) != 0u) return false;
     if (stepY >= 0) {
         int next = findLSB(mask & (0xffffffffu << uint(band)));
-        edge = next < 0 ? waterFarSize.y : next * 2;
+        edge = next < 0 ? waterFarSize.y : next * waterHeightBand;
     } else {
         int next = findMSB(mask & (0xffffffffu >> uint(31 - band)));
-        edge = (next + 1) * 2;
+        edge = (next + 1) * waterHeightBand;
     }
     return true;
 }
@@ -179,17 +179,18 @@ bool waterTraceFaces(vec3 position, vec3 direction, float limit, out float dista
     uint smallColumn = 0u;
     // Carry the crossed integer boundary exactly, including nearly tangent
     // rays where a small floating-point nudge rounds back into the old cell.
-    for (int visit = 0; visit < 160 && cursor < limit; ++visit) {
+    int visitLimit = limit > 96.0 ? 320 : 160;
+    for (int visit = 0; visit < visitLimit && cursor < limit; ++visit) {
         ivec3 span = ivec3(1);
         int large = waterColumnIndex(cell, 16);
         if (large != previousLarge) {
-            largeColumn = imageLoad(colorimg5, glassOnly ? waterGlassColumn(large - 1024)
+            largeColumn = imageLoad(colorimg5, glassOnly ? waterGlassColumn(large - waterSmallColumns)
                                                           : waterColumnAddress(large)).r;
             previousLarge = large;
         }
         int edgeY = 0;
         if (waterColumnGap(largeColumn, cell.y, stepDir.y, edgeY)) {
-            span = ivec3(16, 128, 16);
+            span = ivec3(16, waterFarSize.y, 16);
         } else {
             int small = waterColumnIndex(cell, 4);
             if (small != previousSmall) {
@@ -200,7 +201,7 @@ bool waterTraceFaces(vec3 position, vec3 direction, float limit, out float dista
             ivec3 halfCell = (cell & 3) >> 1;
             int octant = halfCell.x + 2 * halfCell.y + 4 * halfCell.z;
             if (waterColumnGap(smallColumn, cell.y, stepDir.y, edgeY)) {
-                span = ivec3(4, 128, 4);
+                span = ivec3(4, waterFarSize.y, 4);
             } else if ((allSlices & wanted) == 0u) {
                 span = ivec3(4);
             } else if ((mask & (1u << uint(24 + octant))) == 0u) {
@@ -215,7 +216,7 @@ bool waterTraceFaces(vec3 position, vec3 direction, float limit, out float dista
         }
         ivec3 lower = cell & ~(span - 1);
         ivec3 upper = lower + span;
-        if (span.y == 128) {
+        if (span.y == waterFarSize.y) {
             if (stepDir.y < 0) lower.y = edgeY;
             else upper.y = edgeY;
         }
@@ -245,7 +246,7 @@ bool waterTraceFaces(vec3 position, vec3 direction, float limit, out float dista
         int face = waterFindFace(owner, axis, stepDir[axis] > 0, false, glassOnly);
         if (face < 0) continue;
         // Reconstruct the final distance against the actual integer plane in
-        // camera-relative space. The traversal grid has up to 128 cells, so
+        // camera-relative space. The traversal grid has up to 256 cells, so
         // rounding its origin can noticeably shift a nearly parallel hit.
         float plane = float(owner[axis] + int(stepDir[axis] < 0));
         precise float hitDistance = ((plane - cameraPosition[axis]) - relativeOrigin[axis]) * reciprocal[axis];

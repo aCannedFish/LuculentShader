@@ -3223,6 +3223,11 @@ vec3 computePbrLighting(LabPbrMaterial pbr, vec3 normal, vec2 lightmap, vec3 sha
 
 
 
+#if ENABLE_COLOURED_LIGHTING == 0 && GI_QUALITY == 0
+layout(r32ui, binding=5) uniform uimage2D colorimg5;
+#endif
+#include "/lib/water_plant_surface.glsl"
+
 // Tag only genuinely axis-aligned raster faces. Derivatives are taken before
 // alpha rejection, so a cutout or an adjacent stair cannot tilt this plane.
 float waterFaceTag(vec3 viewPosition) {
@@ -3274,6 +3279,9 @@ void main() {
     if (albedo.a < alphaTestRef) {
         discard;
     }
+    if (waterPlantAboveSurface(viewToAbsoluteWorld(vViewPos), vEntityId.x)) {
+        discard;
+    }
 
     /* =======================================================================
      * 第三步：准备光照需要的输入
@@ -3301,7 +3309,7 @@ void main() {
     // 改成写入 MAT_FOLIAGE 等其它值，后处理阶段就能识别出来。
     float material = MAT_SOLID;
     vec3 normalWorld = normalize(mat3(gbufferModelViewInverse) * normalView);
-    bool foliage = vEntityId.x >= 199.5 && vEntityId.x <= 204.5;
+    bool foliage = vEntityId.x >= 199.5 && vEntityId.x <= 205.5;
     bool special = vEntityId.x >= 99.5 && vEntityId.x < 199.5;
     if (foliage) material = MAT_FOLIAGE;
     if (normalWorld.y > 0.98 && texel.a > 0.99 && !foliage && !special) {
@@ -3364,7 +3372,9 @@ void main() {
      */
     writeGBuffers(color, normalView, lmCoord, shadow, material, foliage ? 3.0 : 1.0);
     // C0 is opaque here. Deferred consumes the tag before publishing scene alpha.
-    fullOut0.a = 8.0 + receiverFace;
+    // Preserve aquatic identity separately from the terrain plane. Refraction
+    // still sees the surviving leaves; an air-side reflection cannot hit them.
+    fullOut0.a = (abs(vEntityId.x - 205.0) < 0.5 ? 16.0 : 8.0) + receiverFace;
     fullOut2.a = pbr.metallic;
     fullOut3 = vec4(pbr.f0, sqrt(pbr.roughness));
 

@@ -10,6 +10,7 @@ uniform mat4 modelViewMatrix;
 uniform mat4 projectionMatrix;
 uniform mat3 normalMatrix;
 #ifdef WATER_TRANSMISSION_PASS
+#include "/lib/water_storage_layout.glsl"
 layout(r32ui, binding=5) uniform uimage2D colorimg5;
 uniform int frameCounter;
 uniform int isEyeInWater;
@@ -29,8 +30,8 @@ void main() {
                            imageLoad(colorimg5, ivec2(19,row)).r,
                            imageLoad(colorimg5, ivec2(20,row)).r);
         if (all(notEqual(mask, uvec3(0u)))) {
-            vGlassLower = vec3(findLSB(mask)) * vec3(4,2,4);
-            vGlassUpper = vec3(findMSB(mask) + 1) * vec3(4,2,4);
+            vGlassLower = vec3(findLSB(mask)) * vec3(waterFarSize / 32);
+            vGlassUpper = vec3(findMSB(mask) + 1) * vec3(waterFarSize / 32);
         }
     }
 #endif

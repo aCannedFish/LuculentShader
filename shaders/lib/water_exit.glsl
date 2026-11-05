@@ -30,7 +30,7 @@ vec3 waterExitRadiance(vec2 uv, vec3 interfaceView, vec3 airDirection,
     vec3 faceNormal;
     WaterFaceHit material;
     WaterRayHit layer;
-    WaterRayHit seen = traceWaterGeometry(uv, interfaceView, ray, far, depthtex2, true, layer);
+    WaterRayHit seen = traceWaterGeometry(uv, interfaceView, ray, far, depthtex2, true, false, layer);
     vec2 pixelUv = waterBedUv(seen.uv);
     ivec2 pixel = ivec2(pixelUv * vec2(viewWidth, viewHeight));
     bool fromCamera = seen.distance > 0.0 && texelFetch(colortex15, pixel, 0).a > 0.0;

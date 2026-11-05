@@ -5,6 +5,8 @@
 #include "/lib/uniforms.glsl"
 layout(r32ui, binding=5) uniform uimage2D colorimg5;
 #include "/lib/water_face_cache.glsl"
+#include "/lib/water_plant_surface.glsl"
+#include "/lib/water_waves.glsl"
 layout(triangles) in;
 layout(triangle_strip, max_vertices=3) out;
 
@@ -123,7 +125,7 @@ void captureWaterTriangle() {
     ivec3 lowerCell = clamp(ivec3(floor(low)), ivec3(0), waterFarSize - 1);
     ivec3 upperCell = clamp(ivec3(floor(high)), ivec3(0), waterFarSize - 1);
     for (int axis = 0; axis < 3; ++axis) {
-        int scale = axis == 1 ? 2 : 4;
+        int scale = waterFarSize[axis] / 32;
         uint lo = 0xffffffffu << uint(lowerCell[axis] / scale);
         uint hi = 0xffffffffu >> uint(31 - upperCell[axis] / scale);
         imageAtomicOr(colorimg5, ivec2(18 + axis,row), lo & hi);
@@ -131,7 +133,33 @@ void captureWaterTriangle() {
 #endif
 }
 
+// Retain a conservative top height. Checking all four lattice corners keeps
+// both halves of a water quad below the same wave trough bound.
+void capturePlantWaterSurface() {
+#if SIMPLE_DIMENSION == 0
+    if (isEyeInWater == 1 || abs(gCaster[0] - 3.0) > 0.1 || gCasterNormal[0].y < 0.9) return;
+    vec3 centre = (gNativePosition[0] + gNativePosition[1] + gNativePosition[2]) / 3.0 + floor(cameraPosition);
+    int index = waterPlantColumn(centre.xz);
+    if (index < 0) return;
+    float height = 1e6;
+    for (int i = 0; i < 3; ++i) {
+        vec3 point = gNativePosition[i] + floor(cameraPosition);
+        height = min(height, point.y);
+    }
+#if ENABLE_WATER_WAVES == 1
+    vec2 cell = floor(centre.xz);
+    float wave = min(getWaterWaveHeight(cell, frameTimeCounter),
+        getWaterWaveHeight(cell + vec2(1.0, 0.0), frameTimeCounter));
+    wave = min(wave, getWaterWaveHeight(cell + vec2(0.0, 1.0), frameTimeCounter));
+    wave = min(wave, getWaterWaveHeight(cell + vec2(1.0), frameTimeCounter));
+    height += wave;
+#endif
+    imageAtomicMax(colorimg5, waterPlantAddress(index), floatBitsToUint(height + 4096.0));
+#endif
+}
+
 void main() {
+    capturePlantWaterSurface();
     captureWaterTriangle();
     for (int i = 0; i < 3; ++i) {
         gl_Position = gl_in[i].gl_Position;

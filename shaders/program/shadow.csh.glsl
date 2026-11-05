@@ -3,26 +3,27 @@
 layout(r32ui, binding=5) uniform uimage2D colorimg5;
 #endif
 #include "/lib/water_face_cache.glsl"
+#include "/lib/water_plant_surface.glsl"
 layout(local_size_x=256) in;
-#if ENABLE_COLOURED_LIGHTING == 1 || GI_QUALITY > 0
-#if COLOURED_VOLUME_SIZE == 32
-const ivec3 workGroups = ivec3(640, 1, 1);
-#elif COLOURED_VOLUME_SIZE == 48
-const ivec3 workGroups = ivec3(640, 1, 1);
-#elif COLOURED_VOLUME_SIZE == 64
-const ivec3 workGroups = ivec3(640, 1, 1);
-#else
+// Cover all 229376 opaque face slots, or the larger 96-cell lighting volume.
+#if (ENABLE_COLOURED_LIGHTING == 1 || GI_QUALITY > 0) && COLOURED_VOLUME_SIZE == 96
 const ivec3 workGroups = ivec3(1728, 1, 1);
-#endif
 #else
-const ivec3 workGroups = ivec3(640, 1, 1);
+const ivec3 workGroups = ivec3(896, 1, 1);
 #endif
 void main() {
-#if SIMPLE_DIMENSION == 0 && ENABLE_SHADOWS == 1
+#if SIMPLE_DIMENSION == 0
     int face = int(gl_GlobalInvocationID.x);
+    if (isEyeInWater != 1 && face < waterPlantCells / 2) {
+        imageStore(colorimg5, waterPlantAddress(face), uvec4(0u));
+        imageStore(colorimg5, waterPlantAddress(face + waterPlantCells / 2), uvec4(0u));
+    }
+    if (face == 0) imageStore(colorimg5, ivec2(25, imageSize(colorimg5).y - 1), uvec4(uint(frameCounter) + 1u));
+#endif
+#if SIMPLE_DIMENSION == 0 && ENABLE_SHADOWS == 1
     if (face < 4) imageStore(colorimg5, ivec2(21 + face, imageSize(colorimg5).y - 1), uvec4(0u));
     if (isEyeInWater == 1 && face < waterMacroCount) imageStore(colorimg5, waterTriangleHead(face), uvec4(0u));
-    if (face < 64) imageStore(colorimg5, waterGlassColumn(face), uvec4(0u));
+    if (face < waterLargeColumns) imageStore(colorimg5, waterGlassColumn(face), uvec4(0u));
     if (face < 3) imageStore(colorimg5, ivec2(18 + face, imageSize(colorimg5).y - 1), uvec4(0u));
     if (face < waterColumnCount) imageStore(colorimg5, waterColumnAddress(face), uvec4(0));
     if (face < waterMacroCount) imageStore(colorimg5, waterMacroAddress(face), uvec4(0u));

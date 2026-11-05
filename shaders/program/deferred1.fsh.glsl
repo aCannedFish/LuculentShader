@@ -3351,7 +3351,10 @@ void main() {
     float cutout = abs(texture(colortex1, uv).a - MAT_FOLIAGE) < 0.025 ? 2.0 : 0.0;
     // Preserve the existing opaque/cutout bands. Their fraction carries the
     // terrain plane for water intersections. Other draw types have no tag.
-    float face = opaque.a >= 9.0 && opaque.a <= 14.0 ? round(opaque.a - 8.0) : 0.0;
+    bool aquatic = opaque.a >= 16.0 && opaque.a <= 22.0;
+    float faceTag = aquatic ? opaque.a - 8.0 : opaque.a;
+    float face = faceTag >= 9.0 && faceTag <= 14.0 ? round(faceTag - 8.0) : 0.0;
+    if (aquatic) cutout = 4.0;
     int crease = 0;
     if (face > 0.0) {
         ivec2 pixel = ivec2(gl_FragCoord.xy);

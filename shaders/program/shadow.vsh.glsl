@@ -1199,15 +1199,15 @@ void waterCaptureFace(vec3 centre, vec3 normal, bool glass) {
     uint previous = imageAtomicOr(colorimg5, waterFaceAddress(face, 2 + layer), coverage);
     if (previous == 0u) {
         imageAtomicOr(colorimg5, waterMacroAddress(waterMacroIndex(cell)), waterMacroBits(cell, axis, normal[axis] < 0.0));
-        uint heightBand = 1u << uint(cell.y >> 1);
+        uint heightBand = 1u << uint(cell.y / waterHeightBand);
         imageAtomicOr(colorimg5, waterColumnAddress(waterColumnIndex(cell,4)), heightBand);
         imageAtomicOr(colorimg5, waterColumnAddress(waterColumnIndex(cell,16)), heightBand);
         if (glass) {
-            imageAtomicOr(colorimg5, waterGlassColumn(waterColumnIndex(cell, 16) - 1024), heightBand);
+            imageAtomicOr(colorimg5, waterGlassColumn(waterColumnIndex(cell, 16) - waterSmallColumns), heightBand);
             int row = imageSize(colorimg5).y - 1;
-            imageAtomicOr(colorimg5, ivec2(18, row), 1u << uint(cell.x >> 2));
+            imageAtomicOr(colorimg5, ivec2(18, row), 1u << uint(cell.x / (waterFarSize.x / 32)));
             imageAtomicOr(colorimg5, ivec2(19, row), heightBand);
-            imageAtomicOr(colorimg5, ivec2(20, row), 1u << uint(cell.z >> 2));
+            imageAtomicOr(colorimg5, ivec2(20, row), 1u << uint(cell.z / (waterFarSize.z / 32)));
         }
     }
 #endif
@@ -1267,7 +1267,7 @@ void main() {
     // Keep coordinates relative to the camera's integer position. The
     // geometry stage receives the positions actually used by this shadow draw.
     gNativePosition = vec3(0.0);
-    if (exitLayer) {
+    if (exitLayer || abs(legacyEntity.x - 100.0) < 0.5) {
         gNativePosition = (shadowModelViewInverse * modelViewMatrix * vec4(position, 1.0)).xyz
             + fract(cameraPosition);
     }
