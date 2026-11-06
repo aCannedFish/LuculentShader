@@ -23,13 +23,13 @@ float cloudRenderDistance() {
     return CLOUD_DISTANCE;
 }
 
-// 仰角 0 到约 12 度逐渐恢复覆盖和密度，地平线以下不生成云。
+// 仰角 0 到 6 度逐渐恢复覆盖和密度，地平线以下不生成云。
 // 使用同一空间密度供主视图、反射与阴影采样，避免各路径出现不同云形。
 float cloudHorizonVisibility(vec3 world) {
     vec3 offset = world - cameraPosition;
     float distance = length(offset);
     float elevation = offset.y / max(distance, 0.001);
-    float angular = smoothstep(0.0, 0.208, elevation);
+    float angular = smoothstep(0.0, sin(radians(6.0)), elevation);
     float range = 1.0 - smoothstep(CLOUD_DISTANCE * 0.75, CLOUD_DISTANCE, distance);
     return angular * angular * range * range;
 }
