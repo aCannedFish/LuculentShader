@@ -1,6 +1,6 @@
-/* Distant optics share one reflected and one refracted ray per screen tile.
+/* Distant transmission shares one refracted ray per screen tile.
  * C7 contains the shaded bed. Above water C15 is free after the opaque pass;
- * its signed water depth distinguishes a geometry hit from open sky.
+ * its water depth identifies samples on the same interface.
  */
 #if WATER_REFLECTION_STEPS >= 32
 const int distantWaterStride = 2;
@@ -40,80 +40,18 @@ vec3 waterAirDirection(vec3 position, vec3 opticalNormal) {
     return normalize(ray + up * max(elevation - dot(up, ray), 0.0));
 }
 
-// Both resolutions must sample the same angular field. Retain the resolved
-// short ripple near the eye; the coarser footprint gradually loses that tilt.
+// Keep coherent reflection motion within a small angular footprint. The
+// physical wave normal still serves transmission and surface highlights.
 vec3 waterMirrorNormal(vec3 position, vec3 opticalNormal, vec3 detailNormal, float lod) {
+    vec3 up = mat3(gbufferModelView) * vec3(0.0, 1.0, 0.0);
+    vec3 tilt = (opticalNormal - up * dot(up, opticalNormal)) * 0.18;
 #if ENABLE_WATER_WAVES == 1
-    vec3 up = mat3(gbufferModelView) * vec3(0.0, 1.0, 0.0);
     vec3 ripple = detailNormal - opticalNormal;
-    float limit = 0.012 * WATER_WAVE_STRENGTH * (1.0 - lod)
+    float strength = 0.002 * WATER_WAVE_STRENGTH * (1.0 - lod)
         * smoothstep(0.0, 0.16, dot(up, -normalize(position)));
-    return normalize(opticalNormal + ripple * (limit / (0.10 + length(ripple))));
-#else
-    return opticalNormal;
+    tilt += ripple * (strength / (0.10 + length(ripple)));
 #endif
-}
-
-// Far mirrors need the broad silhouette rather than a subpixel face ID. Look
-// for the first depth crossing in eight intervals and refine the interval twice.
-// Foreground geometry before the interface and submerged texels cannot supply air radiance.
-bool distantWaterCrossing(vec3 position, vec3 ray, vec3 up, float t, out ivec2 pixel) {
-    vec3 probe = position + ray * t;
-    if (probe.z >= -near) return false;
-    vec2 projected = waterProjectPixel(probe, vec2(textureSize(depthtex1, 0)));
-    if (any(lessThan(projected, vec2(0))) || any(greaterThanEqual(projected, vec2(textureSize(depthtex1, 0))))) return false;
-    pixel = ivec2(projected);
-    float depth = texelFetch(depthtex1, pixel, 0).r;
-    if (depth >= 0.999999) return false;
-    vec2 uv = (vec2(pixel) + 0.5) / vec2(textureSize(depthtex1, 0));
-    vec3 receiver = screenToView(uv, depth);
-    if (receiver.z < probe.z || dot(receiver - position, ray) <= 0.01) return false;
-    return dot(receiver - position, up) >= -0.03 && texelFetch(colortex6, pixel, 0).a < 4.5;
-}
-
-vec4 distantWaterRadiance(vec3 position, vec3 ray, float skyLevel) {
-    vec3 up = mat3(gbufferModelView) * vec3(0.0, 1.0, 0.0);
-    float previous = 0.0;
-    for (int i = 1; i <= 8; ++i) {
-        float u = float(i) / 8.0;
-        float t = far * u * u;
-        ivec2 hit;
-        if (distantWaterCrossing(position, ray, up, t, hit)) {
-            for (int j = 0; j < 2; ++j) {
-                float mid = 0.5 * (previous + t);
-                ivec2 candidate;
-                if (distantWaterCrossing(position, ray, up, mid, candidate)) {
-                    hit = candidate;
-                    t = mid;
-                } else previous = mid;
-            }
-            vec2 source = (vec2(hit) + 0.5) / vec2(textureSize(colortex6, 0));
-            return vec4(waterBankLayer(source, texelFetch(colortex6, hit, 0).rgb, position), 1.0);
-        }
-        previous = t;
-    }
-    // At a disocclusion a missed screen ray can still meet the back bank.
-    // Resolve these misses once per tile using actual submitted geometry.
-    float distance;
-    vec3 face;
-    WaterFaceHit material;
-    if (waterNearFaceHit(position, ray, far, distance, face, material)) {
-        vec3 point = position + ray * distance;
-        vec2 source;
-        if (waterCameraSees(point, source)) {
-            ivec2 pixel = ivec2(source * vec2(textureSize(colortex6, 0)));
-            return vec4(waterBankLayer(source, texelFetch(colortex6, pixel, 0).rgb, position), 1.0);
-        }
-        return vec4(waterLightFace(material, face, point), 1.0);
-    }
-    vec3 direction = mat3(gbufferModelViewInverse) * ray;
-#if SIMPLE_DIMENSION == 0
-    vec4 cloud = cloudEnvironment(direction);
-    vec3 sky = skyAtmosphereRadiance(direction) + skyStars(direction);
-    return vec4((cloud.rgb + sky * (1.0 - cloud.a)) * reflectionSkyLightWeight(skyLevel), -1.0);
-#else
-    return vec4(waterEnvironment(viewToAbsoluteWorld(position), direction, reflectionSkyLightWeight(skyLevel), false), -1.0);
-#endif
+    return waterBoundImageNormal(up, tilt);
 }
 
 // One Snell ray meets a local bed-height estimate, then samples a real opaque
@@ -151,48 +89,32 @@ vec3 distantWaterBed(vec2 uv, vec3 position, vec3 normal, vec3 scatter) {
     return mix(scatter, colour, attenuation);
 }
 
-bool readDistantWater(vec3 centre, bool includeBed, out vec3 bed, out vec3 reflection, out vec4 solid) {
+// Only transmission is reconstructed from the coarse tile. The reflected
+// scene is always queried on the current pixel's own ray.
+bool readDistantBed(vec3 centre, out vec3 bed) {
     ivec2 last = textureSize(colortex15, 0) - 1;
     ivec2 tile = ivec2(gl_FragCoord.xy) / distantWaterStride;
     vec3 up = mat3(gbufferModelView) * vec3(0.0, 1.0, 0.0);
-    vec3 terrain = vec3(0.0);
-    vec3 sky = vec3(0.0);
-    float terrainWeight = 0.0;
-    float skyWeight = 0.0;
+    float sum = 0.0;
     bed = vec3(0.0);
-    reflection = vec3(0.0);
-    solid = vec4(0.0);
-    // A compact tent filter softens fine silhouettes. Separate sky and solid
-    // contributions so one unsupported sky sample cannot punch a blue dot in a wall.
     for (int y = -1; y <= 1; ++y) {
         for (int x = -1; x <= 1; ++x) {
             ivec2 cell = tile + ivec2(x, y);
             if (any(lessThan(cell, ivec2(0))) || any(greaterThan(cell, last / distantWaterStride))) continue;
             ivec2 pixel = distantWaterAnchor(cell, last);
-            vec4 tap = texelFetch(colortex15, pixel, 0);
-            if (tap.a == 0.0) continue;
+            float depth = texelFetch(colortex15, pixel, 0).a;
+            if (depth <= 0.0) continue;
             vec2 uv = (vec2(pixel) + 0.5) / vec2(last + 1);
-            vec3 position = waterSurfacePosition(uv, abs(tap.a));
-            if (abs(dot(position - centre, up)) > 0.16 + abs(tap.a) * 0.0005) continue;
+            vec3 position = waterSurfacePosition(uv, depth);
+            if (abs(dot(position - centre, up)) > 0.16 + depth * 0.0005) continue;
             vec2 delta = abs(vec2(pixel) + 0.5 - gl_FragCoord.xy) / float(distantWaterStride);
             vec2 kernel = max(vec2(1.5) - delta, vec2(0.0));
             float weight = kernel.x * kernel.y;
-            if (includeBed) bed += texelFetch(colortex7, pixel, 0).rgb * weight;
-            if (tap.a > 0.0) {
-                terrain += tap.rgb * weight;
-                terrainWeight += weight;
-            } else {
-                sky += tap.rgb * weight;
-                skyWeight += weight;
-            }
+            bed += texelFetch(colortex7, pixel, 0).rgb * weight;
+            sum += weight;
         }
     }
-    float total = terrainWeight + skyWeight;
-    if (total < 0.0001) return false;
-    bed /= total;
-    float skyFraction = skyWeight / total;
-    skyFraction *= smoothstep(0.12, 0.50, skyFraction);
-    solid = vec4(terrain / max(terrainWeight, 0.0001), terrainWeight / total);
-    reflection = mix(solid.rgb, sky / max(skyWeight, 0.0001), skyFraction);
+    if (sum <= 0.0001) return false;
+    bed /= sum;
     return true;
 }

@@ -3268,8 +3268,10 @@ void main() {
     // Preserve the existing opaque/cutout bands. Their fraction carries the
     // terrain plane for water intersections. Other draw types have no tag.
     bool aquatic = opaque.a >= 16.0 && opaque.a <= 22.0;
-    float faceTag = aquatic ? opaque.a - 8.0 : opaque.a;
+    bool rasterCutout = opaque.a >= 24.0 && opaque.a <= 30.0;
+    float faceTag = rasterCutout ? opaque.a - 16.0 : (aquatic ? opaque.a - 8.0 : opaque.a);
     float face = faceTag >= 9.0 && faceTag <= 14.0 ? round(faceTag - 8.0) : 0.0;
+    if (rasterCutout) cutout = 2.0;
     if (aquatic) cutout = 4.0;
     int crease = 0;
     if (face > 0.0) {

@@ -2547,18 +2547,7 @@ const float WATER_BLOCK_ID = 100.0;
 const float WATER_IOR = 1.333;
 uniform sampler2D colortex13;
 
-// 无偏振介质 Fresnel。eta 是入射侧/透射侧折射率，临界角外返回全反射。
-float waterDielectricFresnel(float cosine, float eta) {
-    float c = clamp(cosine, 0.0, 1.0);
-    float discriminant = 1.0 - eta * eta * (1.0 - c * c);
-    if (discriminant <= 0.0) {
-        return 1.0;
-    }
-    float transmitted = sqrt(discriminant);
-    float parallel = (eta * c - transmitted) / max(eta * c + transmitted, EPSILON);
-    float perpendicular = (c - eta * transmitted) / max(c + eta * transmitted, EPSILON);
-    return clamp((parallel * parallel + perpendicular * perpendicular) * 0.5, 0.0, 1.0);
-}
+#include "/lib/water_interface.glsl"
 
 // 重载、离水、传送及缺帧时拒绝历史；竖直移动按相机位移预测真实水深。
 bool validWaterMediumHistory(vec4 history) {
@@ -4244,7 +4233,7 @@ uniform sampler2D colortex2;
 
 // Colour reconstruction validates each mip-zero texel against the hit plane.
 vec4 filteredWaterReflection(vec2 uv, float distanceToHit, float hitDepth, float roughness) {
-    return reflectionSourceFiltered(colortex6, depthtex1, uv, hitDepth, distanceToHit, roughness);
+    return vec4(reflectionSourceRadiance(colortex6, depthtex1, uv), 1.0);
 }
 
 // 判断倒影中的点是否在水面以下：水下的方块不应出现在水面倒影里。
@@ -4310,13 +4299,21 @@ vec3 waterBankLayer(vec2 uv, vec3 backing, vec3 mirror) {
     return mix(backing, applyTransparentLayer(backing, layer), close);
 }
 
+#include "/lib/water_environment.glsl"
+
 // Query unweighted reflected radiance before the water BRDF and air medium.
 // Confidence guides temporal reuse; it never acts as a sky blend opacity.
 vec4 queryWaterRadiance(vec3 position, vec3 direction, float roughness, float skyLevel) {
     vec3 originWorld = viewToAbsoluteWorld(position);
     vec2 uv = waterProjectPixel(position, vec2(1.0));
-    WaterRayHit unusedLayer;
-    WaterRayHit hit = traceWaterGeometry(uv, position, direction, far, depthtex1, false, true, unusedLayer);
+    vec3 up = mat3(gbufferModelView) * vec3(0.0, 1.0, 0.0);
+    vec4 aboveWater = vec4(up, 0.01 - dot(up, position));
+    ScreenReflectionHit screenHit = traceAdaptiveReflectionDetailed(
+        colortex6, depthtex1, position, direction, 0.02, far,
+        min(96, WATER_REFLECTION_STEPS + 16), aboveWater);
+    WaterRayHit hit = WaterRayHit(screenHit.uv,
+        screenHit.coverage > 0.0 ? screenHit.distance : -1.0,
+        !screenHit.refined || screenHit.confidence < 0.75);
     bool visible = hit.distance > 0.0 && !waterReflectionSubmerged(hit.uv, position);
     float maximum = visible ? max(hit.distance - 0.05, 0.0) : far;
     if (!visible || hit.hidden) {
@@ -4350,8 +4347,21 @@ vec4 queryWaterRadiance(vec3 position, vec3 direction, float roughness, float sk
         vec4 sampleColor = filteredWaterReflection(hit.uv, hit.distance,
             reflectionSceneDepth(depthtex1, hit.uv), roughness);
         sampleColor.rgb = waterBankLayer(hit.uv, sampleColor.rgb, position);
+        // At an uncertain or viewport-edge screen hit, transition to a local
+        // scene observation when it describes the same range of receivers.
+        // A known wall is never blended with the sky merely for touching an edge.
+        if (screenHit.confidence < 0.999) {
+            vec4 localScene = sampleWaterEnvironment(position, direction, up);
+            float tolerance = max(0.5, hit.distance * 0.20);
+            if (localScene.a > 0.0 && abs(localScene.a - hit.distance) < tolerance) {
+                sampleColor.rgb = mix(localScene.rgb, sampleColor.rgb,
+                    smoothstep(0.0, 0.95, screenHit.confidence));
+            }
+        }
         if (sampleColor.a > 0.0) return vec4(reflectionAirMedium(sampleColor.rgb, hit.distance, direction), hit.distance);
     }
+    vec4 capturedEnvironment = sampleWaterEnvironment(position, direction, up);
+    if (capturedEnvironment.a > 0.0) return capturedEnvironment;
     vec3 rayWorld = mat3(gbufferModelViewInverse) * direction;
     return vec4(waterEnvironment(originWorld, rayWorld, reflectionSkyLightWeight(skyLevel), false), -1.0);
 }
@@ -4649,53 +4659,20 @@ vec3 applyWaterReflection(vec3 color, vec2 uv, float normalVariance) {
     vec4 bed = texelFetch(colortex7, ivec2(gl_FragCoord.xy), 0);
     float lod = distantWaterBlend(position);
     vec3 farBed = vec3(0.0);
-    vec3 farReflection = vec3(0.0);
-    vec4 farSolid = vec4(0.0);
-    bool hasSharedSample = lod > 0.0 && readDistantWater(position, true, farBed, farReflection, farSolid);
-    if (!hasSharedSample) lod = 0.0;
-    float mirrorLod = lod;
+    if (lod > 0.0 && !readDistantBed(position, farBed)) lod = 0.0;
     vec3 transmitted = farBed;
     if (lod < 1.0) transmitted = mix(waterResolveBed(uv, position, opticalNormal, bed), farBed, lod);
     vec3 reflected = vec3(0.0);
     float roughness = sqrt(sqrt(pow4(WATER_ROUGHNESS) + min(2.0 * normalVariance, 0.035)));
     float coherence = 1.0 / (1.0 + roughness);
-    vec3 geometricNormal = normalize(mat3(gbufferModelView) * vec3(0.0, 1.0, 0.0));
     // 水下窗口需要清晰的波浪起伏；水上倒影使用更平缓的光学斜率，
     // 避免同一组放大法线把相邻倒影拉成相互交叠的碎片。
     vec3 reflectionNormal = waterMirrorNormal(position, opticalNormal, normal, distantWaterBlend(position));
     vec3 direction = waterAirDirection(position, reflectionNormal);
-    float visibility = reflectionGeometricVisibility(dot(geometricNormal, -incident),
-        dot(geometricNormal, direction), roughness);
-    // The captured normal already combines the long waves with the ripples
-    // resolved by this pixel. Their tilt varies the local reflected energy.
-    float weight = waterFresnel(dot(normal, -incident), roughness)
-        * WATER_REFLECTION_STRENGTH * visibility;
-    if (dot(reflectionNormal, -incident) <= 0.0) weight = 0.0;
-    // An unresolved water surface approaches unit Fresnel at the horizon.
-    // Individual crests there cannot switch whole pixels to dark transmission.
-    float viewCosine = max(dot(geometricNormal, -incident), 0.0);
-    float horizon = 1.0 - smoothstep(0.035, 0.095, viewCosine);
-    weight = mix(weight, waterFresnel(viewCosine) * WATER_REFLECTION_STRENGTH, horizon);
+    float weight = waterDielectricFresnel(max(dot(reflectionNormal, -incident), 0.0), 1.0 / WATER_IOR)
+        * WATER_REFLECTION_STRENGTH;
     if (weight > 0.001) {
-        reflected = farReflection;
-        if (lod < 1.0) {
-            vec4 detailed = queryWaterRadiance(position, direction, roughness, surface.b);
-            // Nearby water may mirror a distant roof. Filter that image by
-            // receiver distance independently of the nearby refracted bed.
-            float receiverRange = detailed.a < 0.0 ? far : detailed.a;
-            float distantReceiver = smoothstep(8.0, 15.0, length(position)) * smoothstep(36.0, 72.0, receiverRange);
-            if (distantReceiver > lod) {
-                if (!hasSharedSample) hasSharedSample = readDistantWater(position, false, farBed, farReflection, farSolid);
-                if (hasSharedSample && detailed.a < 0.0) {
-                    mirrorLod = distantReceiver;
-                } else if (hasSharedSample && farSolid.a > 0.1) {
-                    // Keep the coverage of a confirmed fine ray. Only geometry
-                    // colours may soften its distant receiver at a sky boundary.
-                    detailed.rgb = mix(detailed.rgb, farSolid.rgb, distantReceiver);
-                }
-            }
-            reflected = mix(detailed.rgb, farReflection, mirrorLod);
-        }
+        reflected = queryWaterRadiance(position, direction, roughness, surface.b).rgb;
         reflected *= WATER_REFLECTION_BRIGHTNESS;
     }
     // 倒影直接与透射混合：夜晚、雨天的天空暗而灰，水面也随之变暗、变灰。
@@ -5441,6 +5418,9 @@ vec4 upsampleClouds(vec2 uv, float distance) {
 // their coverage before applying this pixel's Fresnel, fog and weather.
 void main() {
     ivec2 pixel = ivec2(gl_FragCoord.xy);
+#if SIMPLE_DIMENSION == 0
+    if (isEyeInWater == 0 && all(lessThan(pixel,ivec2(waterEnvironmentSide)))) updateWaterEnvironment(pixel);
+#endif
     vec2 uv = gl_FragCoord.xy / vec2(viewWidth, viewHeight);
     vec4 surface = waterSurfaceAtPixel(colortex9, ivec2(gl_FragCoord.xy));
     fullOut1 = vec4(0.0);
@@ -5462,15 +5442,7 @@ void main() {
         return;
     }
     vec3 normal = waterInterfaceNormal(position, viewToAbsoluteWorld(position), surface.b);
-    if (representative && (lod > 0.0 || length(position) > 8.0)) {
-        vec3 representativeNormal = waterMirrorNormal(position, normal, decodeWaterNormal(surface.xy), lod);
-        vec3 direction = waterAirDirection(position, representativeNormal);
-        vec4 sampleValue = vec4(0.0, 0.0, 0.0, -1.0);
-        if (WATER_REFLECTION_STRENGTH > 0.0) {
-            sampleValue = distantWaterRadiance(position, direction, surface.b);
-        }
-        fullOut1 = vec4(sampleValue.rgb, sign(sampleValue.a) * surface.a);
-    }
+    if (lod > 0.0 && representative) fullOut1 = vec4(0.0, 0.0, 0.0, surface.a);
     vec4 scattering = texelFetch(colortex7, pixel, 0);
     if (lod >= 1.0) {
         fullOut0 = vec4(distantWaterBed(uv, position, normal, scattering.rgb), 0.0);

@@ -174,7 +174,7 @@ option.WATER_REFLECTION_CLOUDS = 倒影体积云
 value.WATER_REFLECTION_CLOUDS.0 = 查表
 value.WATER_REFLECTION_CLOUDS.1 = 逐像素
 option.WATER_REFLECTION_STEPS = 倒影步数
-option.WATER_REFLECTION_STEPS.comment=屏幕空间倒影每条光线的最大步数。步数越少越易跳过细小物体，覆盖范围不变。
+option.WATER_REFLECTION_STEPS.comment=控制屏幕空间反射的查询预算。32 及以上同时提高屏外环境捕获的精度。
 option.REFLECTION_OCCLUSION_STEPS = 倒影遮挡步数
 option.REFLECTION_OCCLUSION_STEPS.comment=沿阴影贴图找出桥底、树冠下方等相机看不到的遮挡，避免倒影露出天空。水面与材质倒影共用，0 为关闭。
 

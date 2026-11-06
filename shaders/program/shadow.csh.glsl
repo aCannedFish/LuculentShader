@@ -4,6 +4,7 @@ layout(r32ui, binding=5) uniform uimage2D colorimg5;
 #endif
 #include "/lib/water_face_cache.glsl"
 #include "/lib/water_plant_surface.glsl"
+#include "/lib/water_environment_layout.glsl"
 layout(local_size_x=256) in;
 // Cover all 196608 opaque face slots, or the larger 96-cell lighting volume.
 #if (ENABLE_COLOURED_LIGHTING == 1 || GI_QUALITY > 0) && COLOURED_VOLUME_SIZE == 96
@@ -14,6 +15,10 @@ const ivec3 workGroups = ivec3(768, 1, 1);
 void main() {
 #if SIMPLE_DIMENSION == 0
     int face = int(gl_GlobalInvocationID.x);
+    if (isEyeInWater == 0 && face < waterEnvironmentPixels) {
+        ivec2 cell = ivec2(face % waterEnvironmentSide, face / waterEnvironmentSide);
+        imageStore(colorimg5, waterEnvironmentAddress(cell, frameCounter & 1, 0), uvec4(floatBitsToUint(65505.0)));
+    }
     if (isEyeInWater != 1 && face < waterPlantCells / 2) {
         imageStore(colorimg5, waterPlantAddress(face), uvec4(0u));
         imageStore(colorimg5, waterPlantAddress(face + waterPlantCells / 2), uvec4(0u));

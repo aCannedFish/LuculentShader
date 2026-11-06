@@ -2623,18 +2623,7 @@ const float WATER_BLOCK_ID = 100.0;
 const float WATER_IOR = 1.333;
 uniform sampler2D colortex13;
 
-// 无偏振介质 Fresnel。eta 是入射侧/透射侧折射率，临界角外返回全反射。
-float waterDielectricFresnel(float cosine, float eta) {
-    float c = clamp(cosine, 0.0, 1.0);
-    float discriminant = 1.0 - eta * eta * (1.0 - c * c);
-    if (discriminant <= 0.0) {
-        return 1.0;
-    }
-    float transmitted = sqrt(discriminant);
-    float parallel = (eta * c - transmitted) / max(eta * c + transmitted, EPSILON);
-    float perpendicular = (c - eta * transmitted) / max(c + eta * transmitted, EPSILON);
-    return clamp((parallel * parallel + perpendicular * perpendicular) * 0.5, 0.0, 1.0);
-}
+#include "/lib/water_interface.glsl"
 
 // 重载、离水、传送及缺帧时拒绝历史；竖直移动按相机位移预测真实水深。
 bool validWaterMediumHistory(vec4 history) {
@@ -3256,6 +3245,17 @@ vec3 computePbrLighting(LabPbrMaterial pbr, vec3 normal, vec2 lightmap, vec3 sha
 
 uniform sampler2D colortex6;
 uniform sampler2D depthtex1;
+uniform sampler2D colortex15;
+// OptiFine binds the pre-hand depth at unit 12, but its gbuffer uniform setup
+// assigns only depthtex0/1. Keep this sampler off the default material unit.
+layout(binding=12) uniform sampler2D depthtex2;
+#if ENABLE_COLOURED_LIGHTING == 0 && GI_QUALITY == 0
+layout(r32ui, binding=5) uniform uimage2D colorimg5;
+#endif
+#include "/lib/water_face_cache.glsl"
+#include "/lib/water_environment.glsl"
+#include "/lib/water_interface_ray.glsl"
+#include "/lib/water_sheet.glsl"
 in float vWaterRestHeight;
 
 // Thin streams use their actual raster plane, including vertical walls and
@@ -3266,19 +3266,53 @@ vec4 waterStreamLayer(vec3 world, vec3 face, vec3 view, vec3 illumination, vec3 
     downhill = safeNormalize(downhill, vec3(1.0, 0.0, 0.0));
     vec3 across = safeNormalize(cross(face, downhill), vec3(0.0, 0.0, 1.0));
     vec2 phase = vec2(dot(world, across) * 3.0, dot(world, downhill) * 0.9 - frameTimeCounter * 0.9);
-    float streak = waterValueNoise(phase).x * (1.0 - smoothstep(0.12, 0.55, footprint));
-    float cosine = clamp(abs(dot(face, view)), 0.0, 1.0);
+    vec3 waves = waterValueNoise(phase) * (1.0 - smoothstep(0.12, 0.55, footprint));
+    float streak = waves.x;
+    vec3 filmNormal = normalize(face - 0.025 * waves.y * across - 0.012 * waves.z * downhill);
+    if (dot(filmNormal, view) < 0.0) filmNormal = -filmNormal;
+    vec3 normalView = mat3(gbufferModelView) * filmNormal;
+    vec3 incident = normalize(vViewPos);
+    float cosine = clamp(dot(filmNormal, view), 0.0, 1.0);
     // A thin sheet primarily attenuates the background equally in RGB. Use
     // the pond's scattering palette only for the small in-scattered term.
     float thickness = (0.11 + 0.24 * WATER_SURFACE_OPACITY) * mix(1.45, 1.0, cosine);
     thickness *= 1.0 + 0.16 * streak;
     float absorption = 1.0 - exp(-thickness);
     vec3 scatter = waterScatteringAlbedo(biome) * illumination * 0.22 * nativeColour;
-    float sheen = (0.003 + 0.035 * waterFresnel(cosine)) * daylight;
-    vec3 sky = toLinearSpace(skyColor);
-    vec3 highlight = mix(vec3(luma(sky)), sky, 0.10);
+    float ior = mix(1.0, WATER_IOR, WATER_REFRACTION_STRENGTH);
+    float eta = isEyeInWater == 1 ? ior : 1.0 / ior;
+    vec3 inside = refract(incident, normalView, eta);
+    bool totalReflection = dot(inside, inside) < 0.001;
+    vec3 backing = texelFetch(colortex6, ivec2(gl_FragCoord.xy), 0).rgb;
+    vec3 shift = vec3(0.0);
+    if (!totalReflection && isEyeInWater == 1) {
+        // From inside the water this boundary exits into air once. Keep the
+        // outgoing Snell direction all the way to the pre-hand receiver.
+        shift = waterSheetTransmission(colortex15, depthtex2, vViewPos, normalView, inside, far, backing);
+    } else if (!totalReflection) {
+        shift = waterSheetTransmission(colortex6, depthtex1, vViewPos, normalView, inside, 0.24, backing);
+    }
+    vec3 baseView = mat3(gbufferModelView) * face;
+    if (dot(baseView, -incident) < 0.0) baseView = -baseView;
+    vec3 mirrorNormal = waterBoundImageNormal(baseView, normalView - baseView);
+    vec3 ray = reflect(incident, mirrorNormal);
+    vec3 reflected = isEyeInWater == 1 ? scatter : toLinearSpace(skyColor) * daylight;
+    float confidence = isEyeInWater == 1 ? 1.0 : 0.18;
+    ivec2 hit;
+    if (waterScreenHit(vViewPos, ray, normalView, 10, hit)) {
+        reflected = texelFetch(colortex6, hit, 0).rgb;
+        confidence = 1.0;
+    } else {
+        vec4 local = sampleWaterEnvironment(vViewPos, ray, normalView);
+        if (local.a > 0.0) {
+            reflected = local.rgb;
+            confidence = 1.0;
+        }
+    }
+    float sheen = totalReflection ? 1.0 : waterDielectricFresnel(cosine, isEyeInWater == 1 ? WATER_IOR : 1.0 / WATER_IOR) * WATER_REFLECTION_STRENGTH * confidence;
     float opacity = absorption * (1.0 - sheen) + sheen;
-    vec3 radiance = scatter * absorption * (1.0 - sheen) + highlight * sheen;
+    if (texelFetch(depthtex1, ivec2(gl_FragCoord.xy), 0).r < 0.999999) scatter = min(scatter, backing * 0.45);
+    vec3 radiance = scatter * absorption * (1.0 - sheen) + reflected * sheen + shift * (1.0 - opacity);
     return vec4(radiance / max(opacity, 0.0001), clamp(coverage * opacity, 0.0, 1.0));
 }
 
@@ -3359,10 +3393,6 @@ void main() {
         vec3 view = normalize(mat3(gbufferModelViewInverse) * -vViewPos);
         vec4 layer = waterStreamLayer(worldPosition, rasterFace, view, illumination, texel.rgb,
             vColor.rgb, albedo.a, skyVisibility, streamFootprint);
-        // On rock the small amount of in-scattering must not turn a dark
-        // backing into a luminous blue sheet. Keep the transmitted rock hue.
-        vec4 backing = texelFetch(colortex6, ivec2(gl_FragCoord.xy), 0);
-        if (backing.a > 0.5) layer.rgb = min(layer.rgb, backing.rgb * 0.45);
         // The backing has already travelled through the camera fog. Fade the
         // film's contrast with distance so it does not add a second fog colour.
         color = layer.rgb;

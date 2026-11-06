@@ -3327,7 +3327,9 @@ void main() {
     // C0 is opaque here. Deferred consumes the tag before publishing scene alpha.
     // Preserve aquatic identity separately from the terrain plane. Refraction
     // still sees the surviving leaves; an air-side reflection cannot hit them.
-    fullOut0.a = (abs(vEntityId.x - 205.0) < 0.5 ? 16.0 : 8.0) + receiverFace;
+    float receiverClass = renderStage == 9 ? 24.0 : 8.0;
+    if (abs(vEntityId.x - 205.0) < 0.5) receiverClass = 16.0;
+    fullOut0.a = receiverClass + receiverFace;
     fullOut2.a = pbr.metallic;
     fullOut3 = vec4(pbr.f0, sqrt(pbr.roughness));
 

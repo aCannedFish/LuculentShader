@@ -179,7 +179,7 @@ option.WATER_REFLECTION_CLOUDS = Reflected Clouds
 value.WATER_REFLECTION_CLOUDS.0 = Lookup
 value.WATER_REFLECTION_CLOUDS.1 = Per-pixel
 option.WATER_REFLECTION_STEPS = Reflection Steps
-option.WATER_REFLECTION_STEPS.comment=Maximum screen-space reflection steps per ray. Fewer steps may skip thin objects; reach is unchanged.
+option.WATER_REFLECTION_STEPS.comment=Controls the screen-space reflection query budget. Values of 32 or higher also increase local environment capture resolution.
 option.REFLECTION_OCCLUSION_STEPS = Reflection Occlusion Steps
 option.REFLECTION_OCCLUSION_STEPS.comment=Marches the shadow map to find occluders the camera cannot see, such as bridge undersides and tree canopies, so reflections do not show sky. Shared by water and material reflections; 0 disables it.
 
