@@ -2498,33 +2498,7 @@ vec3 shadowClipToUv(vec4 shadowClipPos) {
  * 计算给定距离处的雾浓度
  *   返回 0 = 完全清晰，1 = 完全被雾遮蔽
  * ------------------------------------------------------------------------ */
-float getFogFactor(float distanceToCamera) {
-    // Lava immersion remains dense even when the dimension has a long fog range.
-    if (isEyeInWater == 2) {
-        return 1.0 - exp(-max(distanceToCamera, 0.0) * 4.0);
-    }
-    if (isEyeInWater == 1) {
-        // 水内光程在 composite 统一处理，避免对岸上几何重复加水雾。
-        return 0.0;
-    }
-
-#if SIMPLE_DIMENSION != 0
-    float density = SIMPLE_DIMENSION == -1 ? NETHER_FOG_DENSITY : END_FOG_DENSITY;
-    float extinction = 1.0 - exp(-distanceToCamera * density * FOG_DENSITY);
-    float border = smoothstep(far * 0.65, far * 0.98, distanceToCamera);
-    return 1.0 - (1.0 - extinction) * (1.0 - border);
-#endif
-    // 空气中：线性雾。
-    // 起点定在 55% 视距 —— 太近会让世界灰蒙蒙的，太远又藏不住边界。
-    // FOG_DENSITY 越大，分母越大，雾开始得越早。
-    float rain = weatherRainAmount();
-    float fogStart = far * mix(0.55, 0.28, rain) / max(FOG_DENSITY, EPSILON);
-    float fogEnd   = far * mix(0.98, 0.86, rain) / max(FOG_DENSITY, EPSILON);
-
-    // smoothstep 比 linear 好在两端导数为 0：
-    // 雾的"出现"和"饱和"都是渐进的，不会有可见的硬边。
-    return smoothstep(fogStart, fogEnd, distanceToCamera);
-}
+#include "/lib/fog_medium.glsl"
 
 
 /* ---------------------------------------------------------------------------
