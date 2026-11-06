@@ -81,7 +81,7 @@ void main() {
     vec3 rawAlbedo = albedo.rgb;
     // 光照在相同的线性空间中计算；透明度保持原值。
     albedo.rgb = toLinearSpace(albedo.rgb);
-    if (albedo.a < alphaTestRef) {
+    if ((isParticleStage() && albedo.a <= 0.001) || albedo.a < alphaTestRef) {
         discard;
     }
 
@@ -100,6 +100,6 @@ void main() {
     // 4. 雾
     color = applyRainParticleFog(color, rawAlbedo, viewDistance, albedo.a, rainLayer);
 
-    writeGBuffers(color, normalView, lmCoord, shadow, MAT_SOLID, albedo.a);
+    writeGBuffers(color, normalView, lmCoord, shadow, isParticleStage() ? MAT_BILLBOARD : MAT_SOLID, albedo.a);
 }
 

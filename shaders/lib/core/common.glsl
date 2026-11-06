@@ -94,6 +94,7 @@ vec3 decodeNormal(vec2 encoded) {
  *   后面想给水做屏幕空间反射、给树叶做风摆动，都靠它来区分。
  * ------------------------------------------------------------------------ */
 #define MAT_SOLID   0.20
+#define MAT_BILLBOARD 0.22
 #define MAT_WATER   0.45
 #define MAT_FOLIAGE 0.70
 #define MAT_ENTITY  1.00

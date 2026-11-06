@@ -63,6 +63,10 @@ void main() {
     }
     vec4 reflectionSource = depth < 0.999999
         ? vec4(opaque.rgb, 1.0 + cutout + (face * 16.0 + float(crease)) / 256.0) : vec4(0.0);
+    // Preserve the exact view-facing plane of native sprites. Sparse depth
+    // neighbours around a particle do not describe its raster plane.
+    bool billboard = abs(texture(colortex1, uv).a - MAT_BILLBOARD) < 0.002;
+    if (billboard && depth < 0.999999) reflectionSource.a = 1.5;
     vec3 color = fillSkyBackground(opaque.rgb, uv, depth);
     // 方块只保留漫反射/粗糙Glossy，场景辐射仍单独发布给水面使用。
     bool wetActive = ENABLE_RAIN_PUDDLES == 1 && weatherGroundWetness() * RAIN_PUDDLES_STRENGTH > 0.001;

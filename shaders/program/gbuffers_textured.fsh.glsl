@@ -87,7 +87,7 @@ void main() {
     albedo.rgb = toLinearSpace(albedo.rgb);
 
     // 2. alpha 测试：透明像素丢弃
-    if (albedo.a < alphaTestRef) {
+    if ((isParticleStage() && albedo.a <= 0.001) || albedo.a < alphaTestRef) {
         discard;
     }
 
@@ -106,6 +106,6 @@ void main() {
     // 5. 写出。阴影系数填 1（不受阴影影响），材质标记用 SOLID。
     //    即使不参与阴影，也要往 colortex2 写字，
     //    否则缓冲区里会残留上一帧的数据，调试视图会看到脏东西。
-    writeGBuffers(color, vNormalView, lmCoord, 1.0, MAT_SOLID, albedo.a);
+    writeGBuffers(color, vNormalView, lmCoord, 1.0, isParticleStage() ? MAT_BILLBOARD : MAT_SOLID, albedo.a);
 }
 

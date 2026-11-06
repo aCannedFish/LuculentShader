@@ -11,6 +11,14 @@ struct WaterEnvironmentSample {
     float travel;
 };
 
+// Statistics use offsets from a real observation to avoid cancellation at
+// long range. The selected point itself is never an interpolated empty point.
+struct WaterEnvironmentSupport {
+    vec3 point;
+    vec3 variance;
+    float rangeDeviation;
+};
+
 bool waterEnvironmentHistoryValid() {
 #if SIMPLE_DIMENSION != 0
     return false;
@@ -77,7 +85,9 @@ bool waterEnvironmentSeed(vec3 origin, vec3 ray, vec3 normal, out vec3 lookup) {
 // The capture is an environment approximation, not an intersection with a
 // guessed infinite plane. Use position to correct parallax and reject sources
 // in front of the reflecting interface or on its submerged side.
-vec4 sampleWaterEnvironment(vec3 viewOrigin, vec3 viewDirection, vec3 viewNormal) {
+vec4 sampleWaterEnvironment(vec3 viewOrigin, vec3 viewDirection, vec3 viewNormal,
+                            out WaterEnvironmentSupport support) {
+    support = WaterEnvironmentSupport(vec3(65505.0), vec3(1e20), 1e10);
     if (!waterEnvironmentHistoryValid()) return vec4(0.0);
     vec3 origin = viewToWorld(viewOrigin) + cameraPosition - previousCameraPosition;
     vec3 ray = mat3(gbufferModelViewInverse) * viewDirection;
@@ -100,6 +110,12 @@ vec4 sampleWaterEnvironment(vec3 viewOrigin, vec3 viewDirection, vec3 viewNormal
     vec3 colour = vec3(0.0);
     float sum = 0.0;
     float distanceSum = 0.0;
+    vec3 referencePoint = vec3(0.0);
+    vec3 meanOffset = vec3(0.0);
+    vec3 squareOffset = vec3(0.0);
+    float meanRange = 0.0;
+    float squareRange = 0.0;
+    float dominantWeight = 0.0;
     for (int y = 0; y < 2; ++y) {
         for (int x = 0; x < 2; ++x) {
             ivec2 cell = clamp(base + ivec2(x,y), ivec2(0), ivec2(waterEnvironmentSide - 1));
@@ -109,12 +125,34 @@ vec4 sampleWaterEnvironment(vec3 viewOrigin, vec3 viewDirection, vec3 viewNormal
             if (dot(relative, ray) <= 0.05 || dot(relative, normal) < -0.03) continue;
             float weight = (x == 0 ? 1.0 - fraction.x : fraction.x)
                          * (y == 0 ? 1.0 - fraction.y : fraction.y);
+            if (weight <= 0.0) continue;
+            if (sum <= 0.0) referencePoint = observation.point;
+            vec3 offset = observation.point - referencePoint;
+            float rangeOffset = dot(offset, ray);
+            meanOffset += offset * weight;
+            squareOffset += offset * offset * weight;
+            meanRange += rangeOffset * weight;
+            squareRange += rangeOffset * rangeOffset * weight;
+            if (weight > dominantWeight) {
+                support.point = observation.point;
+                dominantWeight = weight;
+            }
             colour += observation.colour * weight;
             distanceSum += dot(relative, ray) * weight;
             sum += weight;
         }
     }
-    return sum > 0.001 ? vec4(colour / sum, distanceSum / sum) : vec4(0.0);
+    if (sum <= 0.001) return vec4(0.0);
+    support.variance = max(squareOffset / sum - (meanOffset / sum) * (meanOffset / sum), vec3(0.0));
+    float rangeMean = meanRange / sum;
+    support.rangeDeviation = sqrt(max(squareRange / sum - rangeMean * rangeMean, 0.0));
+    return vec4(colour / sum, distanceSum / sum);
+}
+
+// Forward and already verified screen receivers retain the existing lookup.
+vec4 sampleWaterEnvironment(vec3 origin, vec3 direction, vec3 normal) {
+    WaterEnvironmentSupport support;
+    return sampleWaterEnvironment(origin, direction, normal, support);
 }
 
 #ifdef WATER_TRANSMISSION_PASS
@@ -141,6 +179,7 @@ void updateWaterEnvironment(ivec2 cell) {
             vec3 point = screenToView(centre,depth);
             vec4 water = texelFetch(colortex9,p,0);
             if (length(point) > 1.0 && radiance.a > 1.0 && radiance.a < 4.5
+                && fract(radiance.a) != 0.5
                 && (water.a < 0.5 || water.b >= -point.z)) {
                 result.point = viewToWorld(point);
                 result.colour = radiance.rgb;

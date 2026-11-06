@@ -1,6 +1,7 @@
 // Water optical stage 9: reflected radiance.
 /* RENDERTARGETS: 15 */
 #include "/lib/water/pipeline.glsl"
+#include "/lib/reflections/water_radiance_query.glsl"
 
 // Resolve reflection separately from refraction to keep both programs within
 // native driver instruction limits. Preserve the pre-hand source underwater.

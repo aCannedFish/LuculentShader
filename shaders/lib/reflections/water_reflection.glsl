@@ -356,78 +356,6 @@ vec3 waterBankLayer(vec2 uv, vec3 backing, vec3 mirror) {
 }
 
 #include "/lib/water_environment.glsl"
-#include "/lib/water_reflection_trace.glsl"
-
-// Query unweighted reflected radiance before the water BRDF and air medium.
-// Confidence guides temporal reuse; it never acts as a sky blend opacity.
-vec4 queryWaterRadiance(vec3 position, vec3 direction, float roughness, float skyLevel) {
-    vec3 originWorld = viewToAbsoluteWorld(position);
-    vec2 uv = waterProjectPixel(position, vec2(1.0));
-    vec3 up = mat3(gbufferModelView) * vec3(0.0, 1.0, 0.0);
-    vec4 aboveWater = vec4(up, 0.01 - dot(up, position));
-    ScreenReflectionHit screenHit = traceWaterImageDetailed(
-        colortex6, depthtex1, position, direction, 0.02, far,
-        min(96, WATER_REFLECTION_STEPS + 16), aboveWater);
-    WaterRayHit hit = WaterRayHit(screenHit.uv,
-        screenHit.coverage > 0.0 ? screenHit.distance : -1.0,
-        !screenHit.refined || screenHit.confidence < 0.75);
-    bool visible = hit.distance > 0.0 && !waterReflectionSubmerged(hit.uv, position);
-    float maximum = visible ? max(hit.distance - 0.05, 0.0) : far;
-    if (!visible || hit.hidden) {
-        float sunDistance = -1.0;
-        vec2 sunPixel;
-        bool sunHit = REFLECTION_OCCLUSION_STEPS > 0
-            && waterSunIntersection(position, direction, maximum, sunDistance, sunPixel);
-        float faceDistance;
-        vec3 faceNormal;
-        WaterFaceHit material;
-        bool nativeHit = waterNearFaceHit(position, direction,
-            min(sunHit ? sunDistance + 0.015 : maximum, far), faceDistance, faceNormal, material);
-        if (nativeHit || sunHit) {
-            float distance = nativeHit ? faceDistance : sunDistance;
-            vec3 point = position + direction * distance;
-            vec2 witness;
-            vec3 radiance;
-            if (waterCameraSees(point, witness)) {
-                radiance = filteredWaterReflection(witness, distance,
-                    reflectionSceneDepth(depthtex1, witness), roughness).rgb;
-                radiance = waterBankLayer(witness, radiance, position);
-            } else if (nativeHit) {
-                radiance = waterLightFace(material, faceNormal, point);
-            } else {
-                radiance = waterCasterRadiance(sunPixel, point).rgb;
-            }
-            return vec4(reflectionAirMedium(radiance, distance, direction, position), distance);
-        }
-    }
-    if (visible) {
-        vec4 sampleColor = filteredWaterReflection(hit.uv, hit.distance,
-            reflectionSceneDepth(depthtex1, hit.uv), roughness);
-        sampleColor.rgb = waterBankLayer(hit.uv, sampleColor.rgb, position);
-        // At an uncertain or viewport-edge screen hit, transition to a local
-        // scene observation when it describes the same range of receivers.
-        // A known wall is never blended with the sky merely for touching an edge.
-        if (screenHit.confidence < 0.999) {
-            vec4 localScene = sampleWaterEnvironment(position, direction, up);
-            float tolerance = max(0.5, hit.distance * 0.20);
-            if (localScene.a > 0.0 && abs(localScene.a - hit.distance) < tolerance) {
-                sampleColor.rgb = mix(localScene.rgb, sampleColor.rgb,
-                    smoothstep(0.0, 0.95, screenHit.confidence));
-            }
-        }
-        if (sampleColor.a > 0.0) return vec4(reflectionAirMedium(sampleColor.rgb, hit.distance, direction, position), hit.distance);
-    }
-    vec4 capturedEnvironment = sampleWaterEnvironment(position, direction, up);
-    if (capturedEnvironment.a > 0.0) {
-        capturedEnvironment.rgb = reflectionAirMedium(capturedEnvironment.rgb,
-            capturedEnvironment.a, direction, position);
-        return capturedEnvironment;
-    }
-    vec3 rayWorld = mat3(gbufferModelViewInverse) * direction;
-    vec3 sky = waterEnvironment(originWorld, rayWorld, reflectionSkyLightWeight(skyLevel), false);
-    return vec4(reflectionAirMedium(sky, far, direction, position),
-        screenHit.confidence > 0.9 ? -1.0 : -2.0);
-}
 
 // Reproject only the footprint of an already resolved visible receiver. The
 // full two-view search is shared by these samples. At a crease each subray
@@ -645,7 +573,8 @@ vec3 transmitWaterSample(vec2 uv, vec3 position, vec3 opticalNormal, vec4 surfac
         vec3 colourPoint = !approximate && bedHit.distance > 0.0
             ? viewToAbsoluteWorld(position + ray * bedHit.distance) : opaqueWorld;
         if (!approximate && backgroundLayer.a <= 0.0 && opaqueDepth < 0.999999
-            && texelFetch(colortex6, ivec2(sourceUv * vec2(viewWidth, viewHeight)), 0).a < 2.5) {
+            && texelFetch(colortex6, ivec2(sourceUv * vec2(viewWidth, viewHeight)), 0).a < 2.5
+            && fract(texelFetch(colortex6, ivec2(sourceUv * vec2(viewWidth, viewHeight)), 0).a) != 0.5) {
             faceTag = waterBedFaceTag(colourPoint, receiverNormal, waterDistance);
         }
         vec3 bedColour = waterTransmissionColor(colortex6, depthtex1, transmittedUv,

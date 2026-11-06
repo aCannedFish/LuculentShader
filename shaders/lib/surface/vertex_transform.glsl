@@ -112,7 +112,8 @@ void transformGBuffersVertex(vec3 position, vec3 normal, vec2 texCoord,
     // 处理办法和主流光影包一致：只把"接近 0"的 alpha 归一到 1，
     // 真正的半透明（粒子淡出等，alpha 在 0.1 以上）原样保留。
     vColor = color;
-    if (vColor.a < 0.1) {
+    // Particle alpha is native coverage, including its final fade-out.
+    if (vColor.a < 0.1 && !isParticleStage()) {
         vColor.a = 1.0;
     }
 }

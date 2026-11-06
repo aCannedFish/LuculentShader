@@ -36,6 +36,15 @@ bool isTerrainStage() {
     return isOpaqueTerrainStage() || isTranslucentTerrainStage();
 }
 
+// Native particles are camera-facing quads, not inferred terrain planes.
+bool isParticleStage() {
+#ifdef IS_IRIS
+    return renderStage == MC_RENDER_STAGE_PARTICLES;
+#else
+    return renderStage == 18;
+#endif
+}
+
 bool isActorStage() {
 #ifdef IS_IRIS
     return renderStage == MC_RENDER_STAGE_ENTITIES

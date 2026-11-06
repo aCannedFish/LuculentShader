@@ -29,6 +29,7 @@ vec3 waterAxisNormal(float tag) {
 
 vec3 waterNormalFromSample(vec2 uv, vec3 centre, sampler2D opaqueDepth, float tag) {
     vec2 pixel = floor(uv * vec2(viewWidth, viewHeight));
+    if (fract(tag) == 0.5) return normalize(mat3(gbufferModelViewInverse) * vec3(0.0, 0.0, 1.0));
     if (fract(tag) >= 0.0625 && fract(tag) < 0.4375) return waterAxisNormal(tag);
     vec3 left = waterBedPoint(pixel - vec2(1.0, 0.0), opaqueDepth);
     vec3 right = waterBedPoint(pixel + vec2(1.0, 0.0), opaqueDepth);
@@ -60,6 +61,7 @@ vec3 waterTransmissionColor(sampler2D scene, sampler2D opaqueDepth, vec2 uv,
     float tolerance = max(0.02, length(bedWorld - cameraPosition) * 0.002);
     float faceData = fract(texelFetch(scene, ivec2(floor(uv * size)), 0).a);
     int centreTag = int(faceData * 16.0);
+    bool axisTagged = centreTag >= 1 && centreTag <= 6;
     vec3 owner = floor(bedWorld - 0.005 * bedNormal);
     for (int x = 0; x < 2; x++) {
         for (int y = 0; y < 2; y++) {
@@ -71,7 +73,7 @@ vec3 waterTransmissionColor(sampler2D scene, sampler2D opaqueDepth, vec2 uv,
             int neighbourTag = int(fract(colour.a) * 16.0);
             if (centreTag > 0 && neighbourTag > 0 && centreTag != neighbourTag) continue;
             vec3 world = viewToAbsoluteWorld(screenToView(sampleUv, depth));
-            if (centreTag > 0 && any(notEqual(floor(world - 0.005 * bedNormal), owner))) continue;
+            if (axisTagged && any(notEqual(floor(world - 0.005 * bedNormal), owner))) continue;
             if (world.y >= waterHeight - 0.005 || abs(dot(world - bedWorld, bedNormal)) > tolerance) continue;
             float weight = (x == 0 ? 1.0 - fraction.x : fraction.x)
                 * (y == 0 ? 1.0 - fraction.y : fraction.y);
@@ -81,7 +83,7 @@ vec3 waterTransmissionColor(sampler2D scene, sampler2D opaqueDepth, vec2 uv,
     }
     edge = total < 0.999 || (int(round(faceData * 256.0)) & 15) != 0;
     if (total > 0.00001) return sum / total;
-    if (centreTag > 0) {
+    if (axisTagged) {
         vec4 owned = waterOwnedColour((gbufferModelView * vec4(bedWorld-cameraPosition,1.0)).xyz, bedNormal);
         if (owned.a > 0.0) return owned.rgb;
     }
