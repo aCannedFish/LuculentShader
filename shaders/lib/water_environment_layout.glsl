@@ -1,3 +1,5 @@
+#ifndef LUCULENT_WATER_ENVIRONMENT_LAYOUT
+#define LUCULENT_WATER_ENVIRONMENT_LAYOUT
 #if WATER_REFLECTION_STEPS >= 32
 const int waterEnvironmentSide = 256;
 #else
@@ -27,3 +29,5 @@ vec3 waterEnvironmentDirection(vec2 uv) {
     if (p.z < 0.0) p.xy = (1.0 - abs(p.yx)) * waterEnvironmentSign(p.xy);
     return normalize(p);
 }
+
+#endif

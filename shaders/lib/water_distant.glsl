@@ -102,8 +102,9 @@ bool readDistantBed(vec3 centre, out vec3 bed) {
             ivec2 cell = tile + ivec2(x, y);
             if (any(lessThan(cell, ivec2(0))) || any(greaterThan(cell, last / distantWaterStride))) continue;
             ivec2 pixel = distantWaterAnchor(cell, last);
-            float depth = texelFetch(colortex15, pixel, 0).a;
-            if (depth <= 0.0) continue;
+            vec4 surface = texelFetch(colortex9, pixel, 0);
+            if (surface.a < 0.5) continue;
+            float depth = surface.b;
             vec2 uv = (vec2(pixel) + 0.5) / vec2(last + 1);
             vec3 position = waterSurfacePosition(uv, depth);
             if (abs(dot(position - centre, up)) > 0.16 + depth * 0.0005) continue;

@@ -53,7 +53,6 @@ const float drynessHalflife = 160.0;
 #define POM_DISTANCE 32.0 // [16.0 32.0 48.0 64.0]
 #define ORE_GLOW_STRENGTH 0.8 // [0.0 0.4 0.8 1.2 1.6]
 
-
 /* ============================================================================
  * 一、OptiFine 内置常量（会自动生成界面控件，不需要写进 shaders.properties）
  * ==========================================================================*/
@@ -78,7 +77,6 @@ const float sunPathRotation = 0.0;
 
 // 噪声纹理的分辨率（OptiFine 自动生成一张随机纹理并绑定到 noisetex）。
 const int noiseTextureResolution = 1024;
-
 
 /* ============================================================================
  * 二、颜色缓冲区的格式与清除行为
@@ -153,7 +151,6 @@ const vec4 colortex15ClearColor = vec4(0.0, 0.0, 0.0, 0.0);
 const vec4 colortex7ClearColor = vec4(0.0, 0.0, 0.0, 0.0);
 const vec4 colortex9ClearColor = vec4(0.0, 0.0, 0.0, 0.0);
 
-
 /* ============================================================================
  * 三、阴影设置
  * ==========================================================================*/
@@ -186,7 +183,6 @@ const vec4 colortex9ClearColor = vec4(0.0, 0.0, 0.0, 0.0);
 #ifndef SHADOW_BIAS
 #define SHADOW_BIAS 0.00035 // [0.0001 0.0002 0.00035 0.0005 0.001]
 #endif
-
 
 /* ============================================================================
  * 四、光照强度
@@ -289,7 +285,6 @@ const vec4 colortex9ClearColor = vec4(0.0, 0.0, 0.0, 0.0);
 #define SUN_COLOR_DAY 1.0
 #endif
 
-
 /* ============================================================================
  * 五、雾与大气
  * ==========================================================================*/
@@ -367,8 +362,6 @@ const vec4 colortex9ClearColor = vec4(0.0, 0.0, 0.0, 0.0);
 // reflected energy and glints without steering the entire scenery by each ripple.
 #define WATER_WAVE_STRENGTH 1.5 // [0.5 0.75 1.0 1.25 1.5 1.75 2.0]
 
-
-
 // 无贴图水面保留暗青底色、少量群系染色、透明度与波浪；水的观感主要来自倒影。
 #ifndef ENABLE_WATER_TEXTURE
 #define ENABLE_WATER_TEXTURE 0 // [0 1]
@@ -415,6 +408,9 @@ const vec4 colortex9ClearColor = vec4(0.0, 0.0, 0.0, 0.0);
 
 // 粗糙度控制高光宽度、倒影模糊与水下界面过滤，降低清晰镜面贡献。
 #ifndef WATER_ROUGHNESS
+// Spatial radiance denoising; receiver depth protects nearby detail and water edges.
+#define WATER_FILTER_STRENGTH 0.65 // [0.0 0.35 0.65 1.0]
+
 #define WATER_ROUGHNESS 0.25 // [0.04 0.08 0.12 0.18 0.25 0.35]
 #endif
 #ifndef WATER_REFLECTION_STRENGTH
@@ -564,7 +560,6 @@ const vec4 colortex9ClearColor = vec4(0.0, 0.0, 0.0, 0.0);
 #define DITHER_STRENGTH 1.0
 #endif
 
-
 /* ============================================================================
  * 七、调试视图
  *    开发期最常用的功能：把中间结果直接画到屏幕上。
@@ -581,8 +576,6 @@ const vec4 colortex9ClearColor = vec4(0.0, 0.0, 0.0, 0.0);
 #ifndef DEBUG_VIEW
 #define DEBUG_VIEW 0 // [0 1 2 3 4 5 6]
 #endif
-
-
 
 #define COLOURED_VOLUME_SIZE 32 // [32 48 64 96]
 #define COLOURED_LIGHT_STEPS 1 // [1 2 3 4]

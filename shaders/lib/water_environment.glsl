@@ -48,6 +48,32 @@ void waterEnvironmentWrite(ivec2 cell, WaterEnvironmentSample value) {
     imageStore(colorimg5, waterEnvironmentAddress(cell, bank, 4), uvec4(floatBitsToUint(value.travel)));
 }
 
+// A ray from the water and the same direction from the camera do not share
+// visibility. A sky/empty initial cell therefore cannot terminate parallax.
+// Try bounded radial starts, accepting only an observed surface close to the
+// actual reflected ray. These starts are hypotheses, never invented geometry.
+bool waterEnvironmentSeed(vec3 origin, vec3 ray, vec3 normal, out vec3 lookup) {
+    const float starts[4] = float[4](4.0, 16.0, 64.0, 192.0);
+    for (int seed = 0; seed < 4; ++seed) {
+        vec3 candidate = normalize(origin + ray * min(starts[seed], far));
+        for (int step = 0; step < 3; ++step) {
+            WaterEnvironmentSample observation = waterEnvironmentRead(waterEnvironmentCell(candidate));
+            if (observation.point.x > 60000.0 || observation.travel > 24.0) break;
+            vec3 relative = observation.point - origin;
+            float distance = dot(relative, ray);
+            if (distance <= 0.05 || dot(relative, normal) < -0.03) break;
+            float error = length(relative - ray * distance);
+            float footprint = max(length(observation.point) * 6.0 / float(waterEnvironmentSide), 0.02);
+            if (error <= footprint) {
+                lookup = candidate;
+                return true;
+            }
+            candidate = normalize(origin + ray * distance);
+        }
+    }
+    return false;
+}
+
 // The capture is an environment approximation, not an intersection with a
 // guessed infinite plane. Use position to correct parallax and reject sources
 // in front of the reflecting interface or on its submerged side.
@@ -57,6 +83,10 @@ vec4 sampleWaterEnvironment(vec3 viewOrigin, vec3 viewDirection, vec3 viewNormal
     vec3 ray = mat3(gbufferModelViewInverse) * viewDirection;
     vec3 normal = mat3(gbufferModelViewInverse) * viewNormal;
     vec3 lookup = ray;
+    WaterEnvironmentSample initial = waterEnvironmentRead(waterEnvironmentCell(lookup));
+    if (initial.point.x > 60000.0 && !waterEnvironmentSeed(origin, ray, normal, lookup)) {
+        return vec4(0.0);
+    }
     for (int i = 0; i < 2; ++i) {
         WaterEnvironmentSample sampleValue = waterEnvironmentRead(waterEnvironmentCell(lookup));
         if (sampleValue.point.x > 60000.0) break;

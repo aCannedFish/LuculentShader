@@ -5,7 +5,7 @@ in vec4 vaColor;
 in vec3 vaNormal;
 in vec2 vaUV0;
 in ivec2 vaUV2;
-uniform vec3 modelOffset;
+#include "/lib/core/vertex_input.glsl"
 uniform mat4 modelViewMatrix;
 uniform mat4 projectionMatrix;
 uniform mat3 normalMatrix;

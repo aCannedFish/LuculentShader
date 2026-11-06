@@ -1,4 +1,4 @@
 #version 450 core
 // Compatibility (auto-generated)
 #define SIMPLE_DIMENSION (-1)
-#include "/program/composite16.fsh-3658f0bd.glsl"
+#include "/program/composite16.fsh.glsl"

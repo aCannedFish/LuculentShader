@@ -5,6 +5,7 @@
 #include "/lib/uniforms.glsl"
 layout(r32ui, binding=5) uniform uimage2D colorimg5;
 #include "/lib/water_face_cache.glsl"
+#include "/lib/water_entity_triangles.glsl"
 #include "/lib/water_plant_surface.glsl"
 #include "/lib/water_waves.glsl"
 layout(triangles) in;
@@ -27,8 +28,25 @@ out vec3 vCasterNormal;
 out vec2 vCasterLight;
 flat out int vWaterFaceParity;
 out float vCaster;
+flat out int vEntityTriangle;
 uniform sampler2D gtexture;
 uniform vec4 spriteBounds;
+uniform sampler2D gaux4;
+uniform sampler2D colortex14;
+
+// The loader forces shadow blending off, so blendFunc cannot identify glint.
+// Compare the submitted texture to the engine's current glint sprites instead;
+// resource-pack replacements follow the same references without hardcoded hues.
+bool shadowGlintTexture(sampler2D reference) {
+    ivec2 size = textureSize(gtexture, 0);
+    if (any(notEqual(size, textureSize(reference, 0)))) return false;
+    for (int sampleIndex = 0; sampleIndex < 16; ++sampleIndex) {
+        vec2 point = fract(vec2(0.37, 0.61) + float(sampleIndex) * vec2(0.381966, 0.618034));
+        ivec2 pixel = min(ivec2(point * vec2(size)), size - 1);
+        if (any(notEqual(texelFetch(gtexture, pixel, 0), texelFetch(reference, pixel, 0)))) return false;
+    }
+    return true;
+}
 
 // Store smooth normals separately from triangle positions. The latter retain
 // the actual surface; normal maps and vertex normals only affect illumination.
@@ -159,7 +177,33 @@ void capturePlantWaterSurface() {
 #endif
 }
 
+// Preserve actor mesh connectivity before rasterization. The fragment record
+// references this exact triangle even when it is smaller than a shadow texel.
+int captureWaterEntityTriangle() {
+#if SIMPLE_DIMENSION == 0 && ENABLE_SHADOWS == 1
+    if (isTerrainStage()) return -1;
+    vec3 area = cross(gNativePosition[1] - gNativePosition[0], gNativePosition[2] - gNativePosition[0]);
+    if (dot(area, area) < 1e-16) return -1;
+    uint index = imageAtomicAdd(colorimg5, ivec2(29, imageSize(colorimg5).y - 1), 1u);
+    if (index >= uint(waterEntityCapacity)) return -1;
+    for (int vertex = 0; vertex < 3; ++vertex) {
+        for (int axis = 0; axis < 3; ++axis) {
+            imageStore(colorimg5, waterEntityAddress(int(index), vertex * 3 + axis),
+                uvec4(floatBitsToUint(gNativePosition[vertex][axis])));
+        }
+    }
+    return int(index);
+#else
+    return -1;
+#endif
+}
+
 void main() {
+    // Enchantment glint is a colour overlay on an existing actor surface.
+    // Its SRC_COLOR/ONE blend must not replace opaque depth/material records.
+    if ((isActorStage())
+        && (shadowGlintTexture(gaux4) || shadowGlintTexture(colortex14))) return;
+    int entityTriangle = captureWaterEntityTriangle();
     capturePlantWaterSurface();
     captureWaterTriangle();
     for (int i = 0; i < 3; ++i) {
@@ -172,6 +216,7 @@ void main() {
         vCasterLight = gCasterLight[i];
         vWaterFaceParity = gWaterFaceParity[i];
         vCaster = gCaster[i];
+        vEntityTriangle = entityTriangle;
         EmitVertex();
     }
     EndPrimitive();

@@ -244,3 +244,6 @@ option.COLOURED_VOLUME_SIZE.comment=Shared GI and colored-light horizontal exten
 option.COLOURED_LIGHT_STEPS.comment=Updates per frame. More updates converge faster after movement and block edits.
 option.WATER_WAVE_STRENGTH = Wave strength
 option.WATER_WAVE_STRENGTH.comment = Controls moving wave height and visible ripple contrast.
+
+option.WATER_FILTER_STRENGTH=Water reflection filter
+option.WATER_FILTER_STRENGTH.comment=Depth-guided denoising of reflected radiance; zero disables it.

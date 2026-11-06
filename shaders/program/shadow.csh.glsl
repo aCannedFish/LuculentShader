@@ -5,6 +5,7 @@ layout(r32ui, binding=5) uniform uimage2D colorimg5;
 #include "/lib/water_face_cache.glsl"
 #include "/lib/water_plant_surface.glsl"
 #include "/lib/water_environment_layout.glsl"
+#include "/lib/water_entity_triangles.glsl"
 layout(local_size_x=256) in;
 // Cover all 196608 opaque face slots, or the larger 96-cell lighting volume.
 #if (ENABLE_COLOURED_LIGHTING == 1 || GI_QUALITY > 0) && COLOURED_VOLUME_SIZE == 96
@@ -26,6 +27,11 @@ void main() {
     if (face == 0) imageStore(colorimg5, ivec2(25, imageSize(colorimg5).y - 1), uvec4(uint(frameCounter) + 1u));
 #endif
 #if SIMPLE_DIMENSION == 0 && ENABLE_SHADOWS == 1
+    if (face == 0) {
+        int row = imageSize(colorimg5).y - 1;
+        imageStore(colorimg5, ivec2(28, row), uvec4(uint(frameCounter) + 1u));
+        imageStore(colorimg5, ivec2(29, row), uvec4(0u));
+    }
     if (face < 4) imageStore(colorimg5, ivec2(21 + face, imageSize(colorimg5).y - 1), uvec4(0u));
     if (isEyeInWater == 1 && face < waterMacroCount) imageStore(colorimg5, waterTriangleHead(face), uvec4(0u));
     if (face < waterLargeColumns) imageStore(colorimg5, waterGlassColumn(face), uvec4(0u));

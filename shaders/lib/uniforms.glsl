@@ -3,7 +3,6 @@
 #ifndef LIB_UNIFORMS_GLSL
 #define LIB_UNIFORMS_GLSL
 
-
 /* ============================================================================
  * 一、玩家摄像机的矩阵（gbuffer 系列）
  * ==========================================================================*/
@@ -25,10 +24,9 @@ uniform mat4 gbufferProjectionInverse;
 uniform mat4 gbufferPreviousModelView;
 uniform mat4 gbufferPreviousProjection;
 
-// Native OptiFine J9: terrain is 8 (solid), 9 (cutout), 16 (translucent).
-// Entities=10, block entities=11 and solid hand=15 are separate geometry paths.
+// Draw-phase predicates account for both Iris and OptiFine.
 uniform int renderStage;
-
+#include "/lib/core/render_stages.glsl"
 
 /* ============================================================================
  * 二、阴影摄像机的矩阵（shadow 系列）
@@ -41,7 +39,6 @@ uniform mat4 shadowModelView;
 uniform mat4 shadowModelViewInverse;
 uniform mat4 shadowProjection;
 uniform mat4 shadowProjectionInverse;
-
 
 /* ============================================================================
  * 三、摄像机与屏幕
@@ -66,7 +63,6 @@ uniform float aspectRatio;
 // 中心深度（屏幕正中央像素的深度），做自动对焦/景深时用。
 uniform float centerDepthSmooth;
 
-
 /* ============================================================================
  * 四、时间
  * ==========================================================================*/
@@ -85,7 +81,6 @@ uniform float frameTime;
 
 // 已渲染的帧数。做抖动（dither）时用它让每帧噪声不同。
 uniform int frameCounter;
-
 
 /* ============================================================================
  * 五、光照与天空
@@ -108,7 +103,6 @@ uniform vec3 shadowLightPosition;
 
 // 月相，0 = 满月 …… 4 = 新月。可用于调整夜晚亮度。
 uniform int moonPhase;
-
 
 /* ============================================================================
  * 六、天气与环境
@@ -141,7 +135,6 @@ uniform float screenBrightness;
 uniform float nightVision;
 uniform float blindness;
 
-
 /* ============================================================================
  * 七、渲染状态
  * ==========================================================================*/
@@ -157,6 +150,5 @@ uniform vec4 entityColor;
 
 // 当前绑定的方块图集大小（单位：像素），做像素级贴图操作时需要。
 uniform ivec2 atlasSize;
-
 
 #endif  // LIB_UNIFORMS_GLSL
