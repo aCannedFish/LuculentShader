@@ -13,7 +13,7 @@ void main() {
     vec4 surface = waterSurfaceAtPixel(colortex9, ivec2(gl_FragCoord.xy));
     fullOut1 = vec4(0.0);
     if (isEyeInWater == 1) {
-        fullOut0 = applyUnderwaterOptics(uv);
+        fullOut0 = texelFetch(colortex7, pixel, 0);
         return;
     }
     if (isEyeInWater != 0 || surface.a <= 0.001) {
