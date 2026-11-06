@@ -953,33 +953,7 @@ vec2 cloudWindOffset() {
     return frameTimeCounter * CLOUD_SPEED * vec2(1.0, 0.21);
 }
 
-// Keep several cloud groups visible even at short terrain draw distances.
-// The loader's far plane follows render distance; simulation distance does not
-// describe visibility. CLOUD_DISTANCE remains the hard upper work budget.
-float cloudRenderDistance() {
-    float minimumDistance = max(1536.0, CLOUD_SIZE * 3.0);
-    return min(CLOUD_DISTANCE, max(far * 8.0, minimumDistance));
-}
-
-// Removing density as well as contrast prevents a long grazing ray through the
-// flat layer from building an opaque wall. Squared distance avoids a square root
-// per noise/light sample; the fade is continuous when the camera moves.
-float cloudHorizonVisibility(vec3 world) {
-    vec2 offset = world.xz - cameraPosition.xz;
-    float radius = cloudRenderDistance();
-    float distanceSquared = dot(offset, offset);
-    float visibility = 1.0 - smoothstep(radius * radius * 0.25,
-                                       radius * radius, distanceSquared);
-    return visibility * visibility;
-}
-
-// Broad-phase bounds include every possible local base and cloud thickness.
-// Both view rays and shadow rays must include these bounds to avoid clipping
-// elevated clouds or prematurely rejecting the lower cloud groups.
-vec2 cloudAltitudeBounds() {
-    return vec2(CLOUD_HEIGHT - CLOUD_THICKNESS * 0.65,
-                CLOUD_HEIGHT + CLOUD_THICKNESS * 1.90);
-}
+#include "/lib/cloud_geometry.glsl"
 
 // Regional and cloud-group variations move with the weather field. Thickness
 // varies independently, so the layer has uneven bottoms as well as uneven tops.
@@ -998,7 +972,8 @@ vec2 cloudColumnBounds(vec2 position, float type) {
 float cloudDensityWithHeight(vec3 world, bool erosion, out float height) {
     height = 0.0;
     vec2 altitude = cloudAltitudeBounds();
-    if (world.y <= altitude.x || world.y >= altitude.y
+    float radialAltitude = cloudRadialAltitude(world);
+    if (radialAltitude <= altitude.x || radialAltitude >= altitude.y
         || CLOUD_COVERAGE <= 0.0 || CLOUD_OPACITY <= 0.0) {
         return 0.0;
     }
@@ -1009,14 +984,16 @@ float cloudDensityWithHeight(vec3 world, bool erosion, out float height) {
     vec2 horizontal = world.xz - cloudWindOffset();
     float type = cloudWeatherNoise(horizontal / (CLOUD_SIZE * 4.0) + 43.0);
     vec2 column = cloudColumnBounds(horizontal, type);
-    height = (world.y - column.x) / (column.y - column.x);
+    height = (radialAltitude - column.x) / (column.y - column.x);
     if (height <= 0.0 || height >= 1.0) {
         return 0.0;
     }
-    vec3 position = vec3(horizontal.x, world.y - column.x, horizontal.y);
+    vec3 position = vec3(horizontal.x, radialAltitude - column.x, horizontal.y);
     float weather = cloudWeatherNoise(position.xz / (CLOUD_SIZE * 2.5)) * 0.65
                   + cloudWeatherNoise(position.xz / (CLOUD_SIZE * 0.85) + 19.0) * 0.35;
     float coverage = clamp(CLOUD_COVERAGE + (weather - 0.5) * 0.36 + rainStrength * 0.22, 0.02, 0.96);
+    // 掠地云块同时缩小覆盖率，避免仅降低透明度后仍挤成连续云带。
+    coverage *= sqrt(horizon);
     float profile = smoothstep(0.0, 0.08, height)
                   * (1.0 - smoothstep(mix(0.42, 0.70, type), 1.0, height));
     vec4 noise = cloudVolumeNoise(position / CLOUD_SIZE);
@@ -1040,12 +1017,14 @@ float cloudProjectedShadowDirect(vec3 world, vec3 lightDirection) {
 #if SIMPLE_DIMENSION != 0
     return 1.0;
 #endif
-    vec2 altitude = cloudAltitudeBounds();
-    if (CLOUD_SHADOW_STRENGTH <= 0.0 || lightDirection.y <= 0.04 || world.y >= altitude.y) {
+    if (CLOUD_SHADOW_STRENGTH <= 0.0 || lightDirection.y <= 0.04) {
         return 1.0;
     }
-    float entry = max((altitude.x - world.y) / lightDirection.y, 0.0);
-    float exit = (altitude.y - world.y) / lightDirection.y;
+    float entry;
+    float exit;
+    if (!cloudRayInterval(world, lightDirection, CLOUD_DISTANCE, entry, exit)) {
+        return 1.0;
+    }
     float stepLength = (exit - entry) / 5.0;
     float density = 0.0;
     for (int index = 0; index < 5; index++) {

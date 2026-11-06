@@ -1000,33 +1000,7 @@ vec2 cloudWindOffset() {
     return frameTimeCounter * CLOUD_SPEED * vec2(1.0, 0.21);
 }
 
-// Keep several cloud groups visible even at short terrain draw distances.
-// The loader's far plane follows render distance; simulation distance does not
-// describe visibility. CLOUD_DISTANCE remains the hard upper work budget.
-float cloudRenderDistance() {
-    float minimumDistance = max(1536.0, CLOUD_SIZE * 3.0);
-    return min(CLOUD_DISTANCE, max(far * 8.0, minimumDistance));
-}
-
-// Removing density as well as contrast prevents a long grazing ray through the
-// flat layer from building an opaque wall. Squared distance avoids a square root
-// per noise/light sample; the fade is continuous when the camera moves.
-float cloudHorizonVisibility(vec3 world) {
-    vec2 offset = world.xz - cameraPosition.xz;
-    float radius = cloudRenderDistance();
-    float distanceSquared = dot(offset, offset);
-    float visibility = 1.0 - smoothstep(radius * radius * 0.25,
-                                       radius * radius, distanceSquared);
-    return visibility * visibility;
-}
-
-// Broad-phase bounds include every possible local base and cloud thickness.
-// Both view rays and shadow rays must include these bounds to avoid clipping
-// elevated clouds or prematurely rejecting the lower cloud groups.
-vec2 cloudAltitudeBounds() {
-    return vec2(CLOUD_HEIGHT - CLOUD_THICKNESS * 0.65,
-                CLOUD_HEIGHT + CLOUD_THICKNESS * 1.90);
-}
+#include "/lib/cloud_geometry.glsl"
 
 // Regional and cloud-group variations move with the weather field. Thickness
 // varies independently, so the layer has uneven bottoms as well as uneven tops.
@@ -1045,7 +1019,8 @@ vec2 cloudColumnBounds(vec2 position, float type) {
 float cloudDensityWithHeight(vec3 world, bool erosion, out float height) {
     height = 0.0;
     vec2 altitude = cloudAltitudeBounds();
-    if (world.y <= altitude.x || world.y >= altitude.y
+    float radialAltitude = cloudRadialAltitude(world);
+    if (radialAltitude <= altitude.x || radialAltitude >= altitude.y
         || CLOUD_COVERAGE <= 0.0 || CLOUD_OPACITY <= 0.0) {
         return 0.0;
     }
@@ -1056,14 +1031,16 @@ float cloudDensityWithHeight(vec3 world, bool erosion, out float height) {
     vec2 horizontal = world.xz - cloudWindOffset();
     float type = cloudWeatherNoise(horizontal / (CLOUD_SIZE * 4.0) + 43.0);
     vec2 column = cloudColumnBounds(horizontal, type);
-    height = (world.y - column.x) / (column.y - column.x);
+    height = (radialAltitude - column.x) / (column.y - column.x);
     if (height <= 0.0 || height >= 1.0) {
         return 0.0;
     }
-    vec3 position = vec3(horizontal.x, world.y - column.x, horizontal.y);
+    vec3 position = vec3(horizontal.x, radialAltitude - column.x, horizontal.y);
     float weather = cloudWeatherNoise(position.xz / (CLOUD_SIZE * 2.5)) * 0.65
                   + cloudWeatherNoise(position.xz / (CLOUD_SIZE * 0.85) + 19.0) * 0.35;
     float coverage = clamp(CLOUD_COVERAGE + (weather - 0.5) * 0.36 + rainStrength * 0.22, 0.02, 0.96);
+    // 掠地云块同时缩小覆盖率，避免仅降低透明度后仍挤成连续云带。
+    coverage *= sqrt(horizon);
     float profile = smoothstep(0.0, 0.08, height)
                   * (1.0 - smoothstep(mix(0.42, 0.70, type), 1.0, height));
     vec4 noise = cloudVolumeNoise(position / CLOUD_SIZE);
@@ -1087,12 +1064,14 @@ float cloudProjectedShadowDirect(vec3 world, vec3 lightDirection) {
 #if SIMPLE_DIMENSION != 0
     return 1.0;
 #endif
-    vec2 altitude = cloudAltitudeBounds();
-    if (CLOUD_SHADOW_STRENGTH <= 0.0 || lightDirection.y <= 0.04 || world.y >= altitude.y) {
+    if (CLOUD_SHADOW_STRENGTH <= 0.0 || lightDirection.y <= 0.04) {
         return 1.0;
     }
-    float entry = max((altitude.x - world.y) / lightDirection.y, 0.0);
-    float exit = (altitude.y - world.y) / lightDirection.y;
+    float entry;
+    float exit;
+    if (!cloudRayInterval(world, lightDirection, CLOUD_DISTANCE, entry, exit)) {
+        return 1.0;
+    }
     float stepLength = (exit - entry) / 5.0;
     float density = 0.0;
     for (int index = 0; index < 5; index++) {
@@ -1251,7 +1230,7 @@ vec2 airShadowOrigin() {
     return floor(cameraPosition.xz / cell) * cell;
 }
 
-// 以固定云层高度采样，避免几何终点或像素深度重排采样位置。
+// 从固定缓存平面求球壳交点，避免几何终点或像素深度重排采样位置。
 float buildAirCloudShadow(vec2 coordinate, vec3 sun) {
 #if SIMPLE_DIMENSION != 0
     return 1.0;
@@ -1259,13 +1238,15 @@ float buildAirCloudShadow(vec2 coordinate, vec3 sun) {
     if (sun.y <= 0.02 || CLOUD_OPACITY <= 0.0 || CLOUD_SHADOW_STRENGTH <= 0.0) {
         return 1.0;
     }
-    vec2 altitude = cloudAltitudeBounds();
-    float bottom = max(altitude.x, cameraPosition.y);
-    float distance = max(altitude.y - bottom, 0.0) / max(sun.y, 0.02);
     vec3 origin = vec3(airShadowOrigin().x + (coordinate.x * 2.0 - 1.0) * AIR_SHADOW_EXTENT,
                        cameraPosition.y,
                        airShadowOrigin().y + (coordinate.y * 2.0 - 1.0) * AIR_SHADOW_EXTENT);
-    float start = max((bottom - origin.y) / max(sun.y, 0.02), 0.0);
+    float start;
+    float end;
+    if (!cloudRayInterval(origin, sun, CLOUD_DISTANCE, start, end)) {
+        return 1.0;
+    }
+    float distance = end - start;
     float opticalDepth = 0.0;
     for (int index = 0; index < 64; index++) {
         float along = start + (float(index) + 0.5) * distance / 64.0;
@@ -2357,44 +2338,7 @@ vec3 getCloudRayWorld(vec2 uv) {
     return skyViewDirection(uv);
 }
 
-bool cloudRayInterval(vec3 origin, vec3 ray, float limit, out float entry, out float exit) {
-#if SIMPLE_DIMENSION != 0
-    entry = 0.0;
-    exit = 0.0;
-    return false;
-#endif
-    vec2 altitude = cloudAltitudeBounds();
-    entry = 0.0;
-    exit = min(limit, CLOUD_DISTANCE);
-    if (abs(ray.y) >= 0.00001) {
-        float lower = (altitude.x - origin.y) / ray.y;
-        float upper = (altitude.y - origin.y) / ray.y;
-        entry = max(min(lower, upper), 0.0);
-        exit = min(max(lower, upper), exit);
-    } else if (origin.y <= altitude.x || origin.y >= altitude.y) {
-        return false;
-    }
 
-    // Intersect the camera-centred cylinder, including off-centre origins used
-    // by water reflections. Vertical rays retain the full local cloud height.
-    vec2 offset = origin.xz - cameraPosition.xz;
-    float radius = cloudRenderDistance();
-    float horizontal = dot(ray.xz, ray.xz);
-    float boundary = dot(offset, offset) - radius * radius;
-    if (horizontal > 0.000001) {
-        float along = dot(offset, ray.xz);
-        float discriminant = along * along - horizontal * boundary;
-        if (discriminant <= 0.0) {
-            return false;
-        }
-        float root = sqrt(discriminant);
-        entry = max(entry, (-along - root) / horizontal);
-        exit = min(exit, (-along + root) / horizontal);
-    } else if (boundary >= 0.0) {
-        return false;
-    }
-    return exit > entry;
-}
 
 float cloudPhase(float cosine, float g) {
     return (1.0 - g * g) / (4.0 * PI * pow(max(1.0 + g * g - 2.0 * g * cosine, 0.01), 1.5));
