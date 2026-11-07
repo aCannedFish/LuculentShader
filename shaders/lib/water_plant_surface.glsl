@@ -3,8 +3,6 @@
  * entry means unknown; it never licenses clipping a submerged plant.
  */
 #include "/lib/water_storage_layout.glsl"
-const int waterPlantSide = 512;
-const int waterPlantCells = waterPlantSide * waterPlantSide;
 
 ivec2 waterPlantAddress(int index) {
     ivec2 size = imageSize(colorimg5);

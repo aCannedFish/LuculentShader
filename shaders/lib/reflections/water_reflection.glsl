@@ -355,6 +355,7 @@ vec3 waterBankLayer(vec2 uv, vec3 backing, vec3 mirror) {
     return mix(backing, applyTransparentLayer(backing, layer), close);
 }
 
+#include "/lib/water/emitter_surface.glsl"
 #include "/lib/water_environment.glsl"
 
 // Reproject only the footprint of an already resolved visible receiver. The

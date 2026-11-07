@@ -198,11 +198,15 @@ int captureWaterEntityTriangle() {
 #endif
 }
 
+#include "/lib/water/emitter_layout.glsl"
+#include "/lib/water/emitter_capture.glsl"
+
 void main() {
     // Enchantment glint is a colour overlay on an existing actor surface.
     // Its SRC_COLOR/ONE blend must not replace opaque depth/material records.
     if ((isActorStage())
         && (shadowGlintTexture(gaux4) || shadowGlintTexture(colortex14))) return;
+    captureWaterEmitterTriangle();
     int entityTriangle = captureWaterEntityTriangle();
     capturePlantWaterSurface();
     captureWaterTriangle();

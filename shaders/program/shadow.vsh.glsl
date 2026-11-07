@@ -563,7 +563,7 @@ void main() {
     // geometry stage receives the positions actually used by this shadow draw.
     gNativePosition = vec3(0.0);
     if (exitLayer || abs(legacyEntity.x - 100.0) < 0.5
-        || (!isTerrainStage())) {
+        || abs(vCaster - 1.0) < 0.1 || (!isTerrainStage())) {
         gNativePosition = (shadowModelViewInverse * modelViewMatrix * vec4(position, 1.0)).xyz
             + fract(cameraPosition);
     }

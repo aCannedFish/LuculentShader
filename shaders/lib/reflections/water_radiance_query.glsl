@@ -4,6 +4,7 @@
 #define LUCULENT_WATER_RADIANCE_QUERY
 
 #include "/lib/water_reflection_trace.glsl"
+#include "/lib/water/emitter_ray.glsl"
 
 // A current opaque observation can bound its own coherent plane. Cutouts,
 // mixed-depth observations and occluded history cannot establish that bound.
@@ -76,8 +77,40 @@ vec4 waterRefineEnvironmentReceiver(vec3 origin, vec3 ray, float estimate,
     return vec4(0.0);
 }
 
+// The query checks finite support before either use of coarse radiance.
+// Unknown or incomplete mesh data retains the observation. A completed miss
+// removes only the emitter contribution; other observed surfaces remain.
+vec4 validateWaterEnvironmentSource(vec3 position, vec3 direction,
+                                   vec4 capturedEnvironment, WaterEnvironmentSupport support) {
+    if (capturedEnvironment.a <= 0.0 || support.emitterWeight <= 0.0 || !waterEmittersReady()) {
+        return capturedEnvironment;
+    }
+    vec3 sourcePoint = support.emitterPoint - (cameraPosition - previousCameraPosition);
+    vec3 sourceView = (gbufferModelView * vec4(sourcePoint, 1.0)).xyz;
+    float tolerance = clamp(sourceView.z * sourceView.z * 1.2e-7 / max(near, 0.01), 0.006, 0.025);
+    sourcePoint += fract(cameraPosition);
+    // Current geometry must still support the historical observation.
+    // A missing source or incomplete list cannot prove empty space.
+    if (waterEmitterPoint(sourcePoint, tolerance)) {
+        bool complete;
+        float radius = clamp(length(support.emitterPoint) * 12.0 / float(waterEnvironmentSide) + 1.0, 2.0, 8.0);
+        bool supported = waterEmitterRaySupport(viewToWorld(position) + fract(cameraPosition),
+            mat3(gbufferModelViewInverse) * direction, sourcePoint, radius, complete);
+        if (complete && !supported) {
+            float remaining = 1.0 - support.emitterWeight;
+            if (remaining > 0.001) {
+                capturedEnvironment.rgb = max(capturedEnvironment.rgb - support.emitterColour, vec3(0.0)) / remaining;
+                capturedEnvironment.a = (capturedEnvironment.a - support.emitterRange) / remaining;
+            } else {
+                capturedEnvironment.a = 0.0;
+            }
+        }
+    }
+    return capturedEnvironment;
+}
+
 // Query unweighted reflected radiance before the water BRDF and air medium.
-// Confidence guides temporal reuse; it never acts as a sky blend opacity.
+// Viewport confidence may blend only validated local radiance into a known hit.
 vec4 queryWaterRadiance(vec3 position, vec3 direction, float roughness, float skyLevel) {
     vec3 originWorld = viewToAbsoluteWorld(position);
     vec2 uv = waterProjectPixel(position, vec2(1.0));
@@ -126,7 +159,9 @@ vec4 queryWaterRadiance(vec3 position, vec3 direction, float roughness, float sk
         // scene observation when it describes the same range of receivers.
         // A known wall is never blended with the sky merely for touching an edge.
         if (screenHit.confidence < 0.999) {
-            vec4 localScene = sampleWaterEnvironment(position, direction, up);
+            WaterEnvironmentSupport localSupport;
+            vec4 localScene = sampleWaterEnvironment(position, direction, up, localSupport);
+            localScene = validateWaterEnvironmentSource(position, direction, localScene, localSupport);
             float tolerance = max(0.5, hit.distance * 0.20);
             if (localScene.a > 0.0 && abs(localScene.a - hit.distance) < tolerance) {
                 sampleColor.rgb = mix(localScene.rgb, sampleColor.rgb,
@@ -143,6 +178,9 @@ vec4 queryWaterRadiance(vec3 position, vec3 direction, float roughness, float sk
             capturedEnvironment.a, support, outsideReceiver);
         if (receiverSample.a > 0.0) capturedEnvironment = receiverSample;
         else if (outsideReceiver) capturedEnvironment.a = 0.0;
+        else {
+            capturedEnvironment = validateWaterEnvironmentSource(position, direction, capturedEnvironment, support);
+        }
     }
     if (capturedEnvironment.a > 0.0) {
         capturedEnvironment.rgb = reflectionAirMedium(capturedEnvironment.rgb,

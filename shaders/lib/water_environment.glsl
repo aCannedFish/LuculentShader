@@ -9,6 +9,7 @@ struct WaterEnvironmentSample {
     vec3 point;
     vec3 colour;
     float travel;
+    bool emitter;
 };
 
 // Statistics use offsets from a real observation to avoid cancellation at
@@ -17,6 +18,10 @@ struct WaterEnvironmentSupport {
     vec3 point;
     vec3 variance;
     float rangeDeviation;
+    vec3 emitterColour;
+    float emitterWeight;
+    float emitterRange;
+    vec3 emitterPoint;
 };
 
 bool waterEnvironmentHistoryValid() {
@@ -36,8 +41,10 @@ WaterEnvironmentSample waterEnvironmentRead(ivec2 cell) {
         imageLoad(colorimg5, waterEnvironmentAddress(cell, bank, 1)).r,
         imageLoad(colorimg5, waterEnvironmentAddress(cell, bank, 2)).r));
     vec4 rgbe = unpackUnorm4x8(imageLoad(colorimg5, waterEnvironmentAddress(cell, bank, 3)).r);
-    float travel = uintBitsToFloat(imageLoad(colorimg5, waterEnvironmentAddress(cell, bank, 4)).r);
-    return WaterEnvironmentSample(point, rgbe.rgb * exp2(round(rgbe.a * 255.0) - 128.0), travel);
+    uint state = imageLoad(colorimg5, waterEnvironmentAddress(cell, bank, 4)).r;
+    float travel = uintBitsToFloat(state & ~1u);
+    return WaterEnvironmentSample(point, rgbe.rgb * exp2(round(rgbe.a * 255.0) - 128.0),
+        travel, (state & 1u) != 0u);
 }
 
 ivec2 waterEnvironmentCell(vec3 direction) {
@@ -53,7 +60,10 @@ void waterEnvironmentWrite(ivec2 cell, WaterEnvironmentSample value) {
     imageStore(colorimg5, waterEnvironmentAddress(cell, bank, 1), uvec4(floatBitsToUint(value.point.y)));
     imageStore(colorimg5, waterEnvironmentAddress(cell, bank, 2), uvec4(floatBitsToUint(value.point.z)));
     imageStore(colorimg5, waterEnvironmentAddress(cell, bank, 3), uvec4(colour));
-    imageStore(colorimg5, waterEnvironmentAddress(cell, bank, 4), uvec4(floatBitsToUint(value.travel)));
+    // One low mantissa bit classifies the observed primitive. Round travel
+    // upward so the existing history travel bound is never extended.
+    uint travel = (floatBitsToUint(value.travel) + 1u) & ~1u;
+    imageStore(colorimg5, waterEnvironmentAddress(cell, bank, 4), uvec4(travel | uint(value.emitter)));
 }
 
 // A ray from the water and the same direction from the camera do not share
@@ -87,7 +97,8 @@ bool waterEnvironmentSeed(vec3 origin, vec3 ray, vec3 normal, out vec3 lookup) {
 // in front of the reflecting interface or on its submerged side.
 vec4 sampleWaterEnvironment(vec3 viewOrigin, vec3 viewDirection, vec3 viewNormal,
                             out WaterEnvironmentSupport support) {
-    support = WaterEnvironmentSupport(vec3(65505.0), vec3(1e20), 1e10);
+    support = WaterEnvironmentSupport(vec3(65505.0), vec3(1e20), 1e10,
+        vec3(0.0), 0.0, 0.0, vec3(65505.0));
     if (!waterEnvironmentHistoryValid()) return vec4(0.0);
     vec3 origin = viewToWorld(viewOrigin) + cameraPosition - previousCameraPosition;
     vec3 ray = mat3(gbufferModelViewInverse) * viewDirection;
@@ -116,6 +127,7 @@ vec4 sampleWaterEnvironment(vec3 viewOrigin, vec3 viewDirection, vec3 viewNormal
     float meanRange = 0.0;
     float squareRange = 0.0;
     float dominantWeight = 0.0;
+    float emitterDominant = 0.0;
     for (int y = 0; y < 2; ++y) {
         for (int x = 0; x < 2; ++x) {
             ivec2 cell = clamp(base + ivec2(x,y), ivec2(0), ivec2(waterEnvironmentSide - 1));
@@ -137,6 +149,15 @@ vec4 sampleWaterEnvironment(vec3 viewOrigin, vec3 viewDirection, vec3 viewNormal
                 support.point = observation.point;
                 dominantWeight = weight;
             }
+            if (observation.emitter) {
+                support.emitterColour += observation.colour * weight;
+                support.emitterWeight += weight;
+                support.emitterRange += dot(relative, ray) * weight;
+                if (weight > emitterDominant) {
+                    support.emitterPoint = observation.point;
+                    emitterDominant = weight;
+                }
+            }
             colour += observation.colour * weight;
             distanceSum += dot(relative, ray) * weight;
             sum += weight;
@@ -144,6 +165,9 @@ vec4 sampleWaterEnvironment(vec3 viewOrigin, vec3 viewDirection, vec3 viewNormal
     }
     if (sum <= 0.001) return vec4(0.0);
     support.variance = max(squareOffset / sum - (meanOffset / sum) * (meanOffset / sum), vec3(0.0));
+    support.emitterColour /= sum;
+    support.emitterWeight /= sum;
+    support.emitterRange /= sum;
     float rangeMean = meanRange / sum;
     support.rangeDeviation = sqrt(max(squareRange / sum - rangeMean * rangeMean, 0.0));
     return vec4(colour / sum, distanceSum / sum);
@@ -161,7 +185,7 @@ void updateWaterEnvironment(ivec2 cell) {
     if (all(equal(cell, ivec2(0))))
         imageStore(colorimg5, ivec2(26 + bank, imageSize(colorimg5).y - 1), uvec4(uint(frameCounter) + 1u));
     vec3 direction = waterEnvironmentDirection((vec2(cell) + 0.5) / float(waterEnvironmentSide));
-    WaterEnvironmentSample result = WaterEnvironmentSample(vec3(65505.0), vec3(0.0), 0.0);
+    WaterEnvironmentSample result = WaterEnvironmentSample(vec3(65505.0), vec3(0.0), 0.0, false);
     vec3 view = mat3(gbufferModelView) * direction;
     if (view.z < -0.001) {
         vec4 clip = gbufferProjection * vec4(view, 0.0);
@@ -183,6 +207,8 @@ void updateWaterEnvironment(ivec2 cell) {
                 && (water.a < 0.5 || water.b >= -point.z)) {
                 result.point = viewToWorld(point);
                 result.colour = radiance.rgb;
+                float tolerance = clamp(point.z * point.z * 1.2e-7 / max(near, 0.01), 0.006, 0.025);
+                result.emitter = waterEmitterPoint(result.point + fract(cameraPosition), tolerance);
                 waterEnvironmentWrite(cell,result);
                 return;
             }
