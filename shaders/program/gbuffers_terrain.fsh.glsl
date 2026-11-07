@@ -1,4 +1,5 @@
 #define SIMPLE_VARYING in
+SIMPLE_VARYING float vChunkFade;
 layout(location=0) out vec4 fullOut0;
 layout(location=1) out vec4 fullOut1;
 layout(location=2) out vec4 fullOut2;
@@ -109,6 +110,8 @@ float waterFaceTag(vec3 viewPosition) {
     return 0.0;
 }
 
+#include "/lib/post/chunk_transition.glsl"
+
 void main() {
     float receiverFace = waterFaceTag(vViewPos);
     /* =======================================================================
@@ -150,6 +153,12 @@ void main() {
     if (waterPlantAboveSurface(viewToAbsoluteWorld(vViewPos), vEntityId.x)) {
         discard;
     }
+#if ENABLE_CHUNK_TRANSITION == 1
+    // 在材质导数求值之后、昂贵光照之前裁剪；完全加载的区块直接通过。
+    if (vChunkFade < 1.0 && chunkFadeThreshold(gl_FragCoord.xy) >= vChunkFade) {
+        discard;
+    }
+#endif
 
     /* =======================================================================
      * 第三步：准备光照需要的输入

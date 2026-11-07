@@ -517,6 +517,10 @@ const vec4 colortex9ClearColor = vec4(0.0, 0.0, 0.0, 0.0);
 #define COLOR_GRADE_STRENGTH 0.5 // [0.0 0.25 0.5 0.75 1.0]
 #define WHITE_BALANCE 0.0 // [-1.0 -0.5 0.0 0.5 1.0]
 
+// 只融合加载视距末端；Iris 1.21.11 同时使用原生区块渐入进度。
+#define ENABLE_CHUNK_TRANSITION 1 // [0 1]
+#define CHUNK_TRANSITION_WIDTH 32.0 // [16.0 24.0 32.0 48.0 64.0]
+
 // 色调映射曲线。0 = 不处理（直接截断，容易死白），
 // 1 = ACES 近似（电影感，推荐），2 = Reinhard（简单，对比度低）。
 #ifndef TONEMAP_MODE

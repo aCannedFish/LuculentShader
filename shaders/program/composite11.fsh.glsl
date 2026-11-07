@@ -2,6 +2,7 @@
 /* RENDERTARGETS: 0 */
 #define LUCULENT_WATER_COMPOSITION
 #include "/lib/water/pipeline.glsl"
+#include "/lib/atmosphere/chunk_boundary.glsl"
 
 void main() {
     vec2 screenCoord = gl_FragCoord.xy / vec2(viewWidth, viewHeight);
@@ -58,6 +59,14 @@ void main() {
     }
     vec4 cloud = upsampleClouds(screenCoord, volumeDistance);
     color = cloud.rgb + color * (1.0 - cloud.a);
+#if ENABLE_CHUNK_TRANSITION == 1
+    if (isEyeInWater == 0 && (depth < 0.999999 || waterDepth > 0.001)) {
+        vec3 direction = skyViewDirection(screenCoord);
+        vec4 boundary = chunkBoundaryOverlay(direction, sceneDistance * length(direction.xz));
+        color = color * (1.0 - boundary.a * backgroundTransmission)
+            + boundary.rgb * backgroundTransmission;
+    }
+#endif
 #if DEBUG_VIEW == 0
     // 天气只在近处光学处理完成后叠加一次，云背景与无云背景使用同一雨层。
     color = applyRainOverlay(color, imageLoad(colorimg1, ivec2(gl_FragCoord.xy)), waterDepth > 0.001);

@@ -100,10 +100,12 @@ jobs:
                   lines[1:1] = ['#define ' + token + ' 0' for token in formats]
                   if os.environ['LOADER'] == 'iris':
                       phases = 'NONE SKY SUNSET CUSTOM_SKY SUN MOON STARS VOID TERRAIN_SOLID TERRAIN_CUTOUT_MIPPED TERRAIN_CUTOUT ENTITIES BLOCK_ENTITIES DESTROY OUTLINE DEBUG HAND_SOLID TERRAIN_TRANSLUCENT TRIPWIRE PARTICLES CLOUDS RAIN_SNOW WORLD_BORDER HAND_TRANSLUCENT'.split()
-                      lines[1:1] = ['#define IS_IRIS 1'] + [
+                      lines[1:1] = ['#define IS_IRIS 1', '#define IRIS_FEATURE_FADE_VARIABLE 1'] + [
                           f'#define MC_RENDER_STAGE_{name} {index}'
                           for index, name in enumerate(phases)
                       ]
+                      if path.name == 'gbuffers_terrain.vsh':
+                          lines[1:1] = ['uniform float mc_chunkFade;']
                   stage = suffixes[path.suffix]
                   target = Path(temporary) / (path.relative_to(root).as_posix().replace('/', '-') + '.' + stage)
                   target.write_text('\n'.join(lines), encoding='utf-8')

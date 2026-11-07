@@ -1,4 +1,5 @@
 #define SIMPLE_VARYING out
+SIMPLE_VARYING float vChunkFade;
 
 in vec3 vaPosition;
 in vec4 vaColor;
@@ -94,6 +95,13 @@ void captureWaterLightmap() {
 }
 
 void main() {
+    vChunkFade = 1.0;
+#if ENABLE_CHUNK_TRANSITION == 1 && defined(IRIS_FEATURE_FADE_VARIABLE)
+    // Iris 自动声明 mc_chunkFade；负值表示此绘制路径没有区块渐入数据。
+    if (mc_chunkFade >= 0.0) {
+        vChunkFade = smoothstep(0.0, 1.0, mc_chunkFade);
+    }
+#endif
     captureWaterLightmap();
     float alias = mc_Entity.x;
     if (alias >= 6000.0 && alias <= 6010.0) {

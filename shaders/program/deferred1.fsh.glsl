@@ -21,6 +21,7 @@ uniform sampler2D colortex1;
  * cylindrical horizon bounds grazing rays before any density/noise sampling.
  */
 #include "/lib/atmosphere/clouds_deferred_surface.glsl"
+#include "/lib/atmosphere/chunk_boundary.glsl"
 
 /* 雨后地表薄水层。湿度控制积累与消退，连续噪声给出局部积水分布。
  * 法线、原生天光和已有地表高度共同限制范围，避免墙面、树叶与屋内地板积水。
@@ -142,6 +143,15 @@ void main() {
         reflectionSource.rgb = correctSkyFog(reflectionSource.rgb, uv,
             length(screenToView(uv, depth)), 1.0);
     }
+#if ENABLE_CHUNK_TRANSITION == 1
+    if (isEyeInWater == 0 && preHandDepth < 0.999999) {
+        // 使用手部前的真实接收面，倒影与透射保持同一加载边界外观。
+        vec3 world = mat3(gbufferModelViewInverse) * screenToView(uv, preHandDepth);
+        vec4 boundary = chunkBoundaryOverlay(normalize(world), length(world.xz));
+        reflectionSource.rgb = reflectionSource.rgb * (1.0 - boundary.a) + boundary.rgb;
+        fullOut4.rgb = fullOut4.rgb * (1.0 - boundary.a) + boundary.rgb;
+    }
+#endif
     fullOut0 = reflectionSource;
 #if DEBUG_VIEW == 0
     // 反射已读完不透明 G-Buffer，清出水面参数与独立透明层的存储位置。
