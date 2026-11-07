@@ -64,12 +64,16 @@ WaterRayHit waterCreaseHit(ivec2 pixel, vec3 point, vec3 normal, int mask,
         nearest = t;
         uv = clamp(projected, vec2(neighbour) + 0.001, vec2(neighbour) + 0.999) / size;
     }
-    if (centreOK && centreT < nearest) return WaterRayHit(centrePixel / size, centreT, false);
+    if (centreOK && centreT < nearest) {
+        vec2 sourcePixel = clamp(centrePixel, vec2(pixel) + 0.001, vec2(pixel) + 0.999);
+        return WaterRayHit(sourcePixel / size, centreT, false);
+    }
     return WaterRayHit(uv, nearest <= limit ? nearest : -1.0, false);
 }
 
 WaterRayHit traceWaterGeometry(vec2 uv, vec3 origin, vec3 direction, float range, sampler2D depths,
-                               bool preHand, bool airReflection, out WaterRayHit transparent) {
+                               bool preHand, bool airReflection, int visitBudget,
+                               vec4 clipPlane, out WaterRayHit transparent) {
     transparent = WaterRayHit(uv, -1.0, false);
     vec2 size = vec2(textureSize(depths, 0));
     if (direction.z > 0.001) range = min(range, (-near * 1.02 - origin.z) / direction.z);
@@ -88,7 +92,7 @@ WaterRayHit traceWaterGeometry(vec2 uv, vec3 origin, vec3 direction, float range
     float largeExit = limit >= 64.0 ? 0.0 : limit;
     float middleExit = 0.0;
     bool hidden = false;
-    for (int visit = 0; visit < 112 && cursor < limit; ++visit) {
+    for (int visit = 0; visit < 112 && visit < visitBudget && cursor < limit; ++visit) {
         vec2 samplePixel = start + stepDir * min(cursor + 0.001, (cursor + limit) * 0.5);
         ivec2 pixel = clamp(ivec2(floor(samplePixel)), ivec2(0), ivec2(size) - 1);
         float next = cursor;
@@ -178,7 +182,8 @@ WaterRayHit traceWaterGeometry(vec2 uv, vec3 origin, vec3 direction, float range
                 float flags = texelFetch(colortex6, pixel, 0).a;
                 // At long range a cutout texel's support can cross the water
                 // plane. Continue past submerged leaves to the actual backing.
-                if (airReflection && flags >= 4.5) {
+                if (airReflection && (flags >= 4.5
+                    || dot(clipPlane.xyz, point) + clipPlane.w < 0.0)) {
                     hidden = true;
                     cursor = max(next, cursor + 0.001);
                     continue;
@@ -212,7 +217,11 @@ WaterRayHit traceWaterGeometry(vec2 uv, vec3 origin, vec3 direction, float range
                         float radius = max(0.012, -point.z * abs(gbufferProjectionInverse[1][1]) * 4.0 / size.y);
                         bool supported = !cutout || length(intersection - point) <= radius;
                         if (supported && all(lessThanEqual(abs(projected - vec2(pixel) - 0.5), vec2(0.501)))) {
-                            return WaterRayHit(projected / size, t, hidden);
+                            // The support tolerance covers arithmetic at a pixel
+                            // edge. It must not select a different pixel's colour.
+                            vec2 sourcePixel = clamp(projected, vec2(pixel) + 0.001,
+                                vec2(pixel) + 0.999);
+                            return WaterRayHit(sourcePixel / size, t, hidden);
                         }
                     }
                 }
@@ -223,7 +232,14 @@ WaterRayHit traceWaterGeometry(vec2 uv, vec3 origin, vec3 direction, float range
     // Only a completed, entirely visible interval can prove an open exit
     // direction. A viewport edge or exhausted visit budget needs another view.
     bool incomplete = cursor < limit || limit < extent - 0.001;
-    return WaterRayHit(uv, -1.0, !preHand || hidden || incomplete);
+    return WaterRayHit(uv, -1.0, (!preHand && !airReflection) || hidden || incomplete);
+}
+
+// Existing transmission callers keep their original traversal budget and domain.
+WaterRayHit traceWaterGeometry(vec2 uv, vec3 origin, vec3 direction, float range, sampler2D depths,
+                               bool preHand, bool airReflection, out WaterRayHit transparent) {
+    return traceWaterGeometry(uv, origin, direction, range, depths, preHand,
+        airReflection, 112, vec4(0.0), transparent);
 }
 
 WaterRayHit traceWaterGeometry(vec2 uv, vec3 origin, vec3 direction, float range, sampler2D depths) {
