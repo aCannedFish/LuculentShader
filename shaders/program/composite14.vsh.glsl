@@ -9,8 +9,7 @@ uniform vec3 modelOffset;
 uniform mat4 modelViewMatrix;
 uniform mat4 projectionMatrix;
 uniform mat3 normalMatrix;
-/* 泛光垂直过滤的全屏四边形，由加载器按泛光视口缩放。 */
+// 后处理全屏四边形；各通道的视口由 shaders.properties 指定。
 void main() {
     gl_Position = (projectionMatrix * modelViewMatrix * vec4(vaPosition + modelOffset, 1.0));
 }
-

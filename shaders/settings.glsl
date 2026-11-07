@@ -484,10 +484,38 @@ const vec4 colortex9ClearColor = vec4(0.0, 0.0, 0.0, 0.0);
  * 六、后处理
  * ==========================================================================*/
 
-// Display-space edge antialiasing: off, fast FXAA, quality FXAA.
+// 抗锯齿：关闭、快速 FXAA、质量 FXAA、HDR 时域抗锯齿。
 #ifndef AA_MODE
-#define AA_MODE 1 // [0 1 2]
+#define AA_MODE 3 // [0 1 2 3]
 #endif
+
+// TAA 的历史权重与输出锐化；动态表面还会接受深度和颜色变化约束。
+#define TAA_HISTORY_WEIGHT 0.90 // [0.80 0.85 0.90 0.95]
+#define TAA_SHARPNESS 0.15 // [0.0 0.1 0.15 0.25 0.35]
+
+// 相机快门比例。0.5 对应约 180 度快门，半径以 1080p 像素计。
+#define ENABLE_MOTION_BLUR 0 // [0 1]
+#define MOTION_BLUR_SHUTTER 0.5 // [0.25 0.5 0.75 1.0]
+#define MOTION_BLUR_MAX_RADIUS 32.0 // [16.0 24.0 32.0 48.0]
+
+// 景深使用虚拟薄透镜。自动对焦取中心世界深度，不把手持物当作焦点。
+#define ENABLE_DOF 0 // [0 1]
+#define DOF_QUALITY 1 // [1 2]
+#define DOF_FOCUS_MODE 0 // [0 1]
+#define DOF_FOCUS_DISTANCE 10.0 // [1.0 2.0 4.0 8.0 10.0 16.0 32.0 64.0]
+#define DOF_APERTURE 2.8 // [1.4 2.0 2.8 4.0 5.6 8.0]
+#define DOF_STRENGTH 1.0 // [0.5 1.0 1.5 2.0]
+
+// 曝光在场景 HDR 上测光，EXPOSURE 继续作为用户的补偿倍率。
+#define ENABLE_AUTO_EXPOSURE 1 // [0 1]
+#define AUTO_EXPOSURE_MIN 0.5 // [0.25 0.35 0.5 0.75 1.0]
+#define AUTO_EXPOSURE_MAX 4.0 // [1.0 2.0 4.0 6.0 8.0]
+#define AUTO_EXPOSURE_SPEED 1.0 // [0.5 1.0 1.5 2.0]
+
+// 调色强度为零时保持基础色调映射；白平衡在线性 HDR 中执行。
+#define COLOR_GRADE 2 // [0 1 2]
+#define COLOR_GRADE_STRENGTH 0.5 // [0.0 0.25 0.5 0.75 1.0]
+#define WHITE_BALANCE 0.0 // [-1.0 -0.5 0.0 0.5 1.0]
 
 // 色调映射曲线。0 = 不处理（直接截断，容易死白），
 // 1 = ACES 近似（电影感，推荐），2 = Reinhard（简单，对比度低）。
@@ -539,6 +567,9 @@ const vec4 colortex9ClearColor = vec4(0.0, 0.0, 0.0, 0.0);
 #ifndef BLOOM_RADIUS
 #define BLOOM_RADIUS 2.0 // [0.5 0.75 1.0 1.5 2.0]
 #endif
+
+// 在窄光晕与多尺度扩散之间分配能量。
+#define BLOOM_SCATTER 0.7 // [0.0 0.35 0.5 0.7 1.0]
 
 // 受太阳遮挡与实际亮度控制的镜头光晕。
 #ifndef ENABLE_LENS_FLARE

@@ -63,7 +63,8 @@ uniform mat3 normalMatrix;
 #include "/lib/surface/varyings.glsl"
 
 void main() {
-    gl_Position = (projectionMatrix * modelViewMatrix) * vec4(vaPosition + nativeModelOffset(), 1.0);
+    gl_Position = postJitterPosition((projectionMatrix * modelViewMatrix)
+        * vec4(vaPosition + nativeModelOffset(), 1.0));
 
     vTexCoord      = vaUV0;
     vColor         = vaColor;

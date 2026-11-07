@@ -3,13 +3,13 @@
 vec3 bslWaterReflectionBlur(vec2 uv, vec3 position) {
     ivec2 pixel = ivec2(gl_FragCoord.xy);
     vec3 centre = texelFetch(colortex15, pixel, 0).rgb;
-#if WATER_REFLECTION_MOTION_BLUR == 0
+#if WATER_REFLECTION_MOTION_BLUR == 0 || ENABLE_MOTION_BLUR == 1
     return centre;
 #else
     if (frameCounter < 2 || length(cameraPosition - previousCameraPosition) > 8.0) return centre;
     float depth = textureLod(depthtex2, uv, 0.0).r;
     vec4 current = vec4(uv * 2.0 - 1.0, min(depth, 0.9999999) * 2.0 - 1.0, 1.0);
-    vec4 world = gbufferModelViewInverse * gbufferProjectionInverse * current;
+    vec4 world = gbufferModelViewInverse * postRawProjectionInverse() * current;
     world /= world.w;
     world.xyz += cameraPosition - previousCameraPosition;
     vec4 previous = gbufferPreviousProjection * gbufferPreviousModelView * world;

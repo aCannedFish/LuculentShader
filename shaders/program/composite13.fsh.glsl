@@ -1,27 +1,20 @@
-#define SIMPLE_VARYING in
-layout(location=0) out vec4 fullOut0;
-layout(location=1) out vec4 fullOut1;
-layout(location=2) out vec4 fullOut2;
-layout(location=3) out vec4 fullOut3;
-layout(location=4) out vec4 fullOut4;
-/* 水平泛光过滤。复用 alpha 的首个纹素，将太阳可见度传递到下一道过滤。 */
-/* RENDERTARGETS: 4 */
-/* HDR 泛光：先逐样本提取亮部再降采样，随后执行可分离过滤。
- * 缓冲只使用左下有效视口，所有读取限制到有效纹素中心，避免采到旧天空/体积场。
- * 阈值和峰值限制先于平均，保留细小光源并抑制极亮像素的闪烁。
- */
-#include "/lib/core/bloom_composite12.glsl"
-
-uniform sampler2D colortex3;
+// Pair the history writes for OptiFine's frame-start bank reset.
+// Lens blur only changes C0; the synchronized C13 remains unblurred HDR.
+/* RENDERTARGETS: 0,13 */
+layout(location=0) out vec4 sceneOut;
+layout(location=1) out vec4 historyOut;
+#include "/settings.glsl"
+#include "/lib/uniforms.glsl"
+#include "/lib/core/common.glsl"
+uniform sampler2D colortex0;
+uniform sampler2D colortex13;
+uniform sampler2D depthtex0;
+uniform sampler2D depthtex2;
+#include "/lib/post/history.glsl"
+#include "/lib/post/motion_blur.glsl"
 
 void main() {
-    vec2 size = vec2(viewWidth, viewHeight);
-    vec2 uv = gl_FragCoord.xy / bloomSize();
-    float visibility = 0.0;
-    if (gl_FragCoord.x < 1.0 && gl_FragCoord.y < 1.0) {
-        visibility = texture(colortex3, vec2(0.5) / size).a;
-    }
-    vec3 bloom = filterBloom(colortex3, uv, vec2(1.0, 0.0));
-    fullOut0 = vec4(bloom, visibility);
+    vec2 uv = gl_FragCoord.xy / vec2(viewWidth, viewHeight);
+    sceneOut = vec4(postMotionBlur(uv), 1.0);
+    historyOut = texelFetch(colortex13, ivec2(gl_FragCoord.xy), 0);
 }
-

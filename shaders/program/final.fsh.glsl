@@ -6,7 +6,7 @@ layout(location=0) out vec4 fullOut0;
 #include "/lib/core/common.glsl"
 #include "/lib/core/space_forward.glsl"
 #include "/lib/core/noise.glsl"
-#include "/lib/core/bloom_final.glsl"
+#include "/lib/post/bloom.glsl"
 uniform sampler2D colortex0;
 uniform sampler2D colortex3;
 uniform sampler2D depthtex0;

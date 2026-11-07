@@ -76,7 +76,7 @@ void transformGBuffersVertex(vec3 position, vec3 normal, vec2 texCoord,
     // --- 2. 视图空间 -> 裁剪空间 ---
     // 透视投影矩阵会把远处的顶点压向屏幕中心（近大远小），
     // 同时把 w 分量设成"到摄像机的距离"，为后面的透视除法做准备。
-    gl_Position = projectionMatrix * viewPos;
+    gl_Position = postJitterPosition(projectionMatrix * viewPos);
 
     // --- 3. 法线 ---
     // 只取左上角 3x3 做旋转，不平移。

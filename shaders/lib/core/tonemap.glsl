@@ -66,6 +66,8 @@ vec3 gradeNaturalColor(vec3 color) {
     return graded * (luminance / max(luma(graded), EPSILON));
 }
 
+#include "/lib/post/color_grade.glsl"
+
 /* 曝光、亮度曲线和调色使用一个显示出口，全部在线性空间执行。 */
 vec3 applyTonemap(vec3 color) {
     // 1. 曝光：在映射之前整体缩放亮度。
@@ -87,7 +89,7 @@ vec3 applyTonemap(vec3 color) {
     // 小幅抬升中间调；黑点和白点不动，亮部继续由原曲线压缩。
     mappedLuminance += 0.08 * mappedLuminance * (1.0 - mappedLuminance);
     color *= mappedLuminance / max(luminance, EPSILON);
-    color = gradeNaturalColor(color);
+    color = postColorGrade(color);
     // 色域边界处向同亮度中性颜色收敛，软化高光，避免单通道硬裁切。
     float peak = max(color.r, max(color.g, color.b));
     float chromaScale = min(1.0, (1.0 - mappedLuminance)

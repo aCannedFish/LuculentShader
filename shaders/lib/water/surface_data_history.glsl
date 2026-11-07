@@ -141,7 +141,7 @@ vec2 estimateWaterMedium(sampler2D surfaces) {
         }
     }
     float skylight = clamp(float(eyeBrightnessSmooth.y) / 240.0, 0.0, 1.0);
-    vec4 history = texture(colortex13, vec2(0.5));
+    vec4 history = texelFetch(colortex13, ivec2(0), 0);
     bool valid = validWaterMediumHistory(history);
     float predicted = valid ? max(history.x + previousCameraPosition.y - cameraPosition.y, 0.0)
         : (1.0 - skylight) * 15.0;

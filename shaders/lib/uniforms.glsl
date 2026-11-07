@@ -19,8 +19,7 @@ uniform mat4 gbufferProjection;
 // 裁剪空间 -> 视图空间。从深度缓冲还原真实坐标时必用。
 uniform mat4 gbufferProjectionInverse;
 
-// 上一帧的同名矩阵。做运动模糊、TAA、时域降噪时需要，
-// 本基础光影暂时用不到，先声明出来方便后续扩展。
+// 上一帧原生矩阵用于 TAA 重投影与相机运动模糊。
 uniform mat4 gbufferPreviousModelView;
 uniform mat4 gbufferPreviousProjection;
 
@@ -47,7 +46,7 @@ uniform mat4 shadowProjectionInverse;
 // 摄像机的【绝对世界坐标】。视图空间坐标 + cameraPosition = 绝对世界坐标。
 uniform vec3 cameraPosition;
 
-// 上一帧的摄像机位置，同样为扩展预留。
+// 上一帧摄像机位置，用于补偿相机相对世界坐标的平移。
 uniform vec3 previousCameraPosition;
 
 // 投影的近平面 / 远平面距离（单位：方块）。
@@ -150,5 +149,8 @@ uniform vec4 entityColor;
 
 // 当前绑定的方块图集大小（单位：像素），做像素级贴图操作时需要。
 uniform ivec2 atlasSize;
+
+// 所有屏幕重建与光栅化共用同一抖动投影，阴影投影保持独立。
+#include "/lib/post/jitter.glsl"
 
 #endif  // LIB_UNIFORMS_GLSL

@@ -19,6 +19,8 @@ NASA SVS 说明未另行标注的内容属于公共领域，可下载、使用�
 - [Filament 透射与吸收材质](https://google.github.io/filament/main/materials.html)
 - [SIGGRAPH 2016 实时体积云](https://advances.realtimerendering.com/s2016/)
 - [NVIDIA FXAA 算法说明](https://developer.download.nvidia.com/assets/gamedev/files/sdk/11/FXAA_WhitePaper.pdf)：参考显示空间边缘检测、端点搜索和子像素重建方法。
+- [SIGGRAPH 2014 实时渲染课程](https://www.advances.realtimerendering.com/s2014/index.html)：参考时域抗锯齿的 HDR 累积、重投影、历史拒绝和后处理顺序；本项目的实现独立编写。
+- [Iris 缓冲保留接口](https://shaders.properties/current/reference/constants/buffer_clear/)：参考持久颜色附件及下一帧历史的接口约定。
 - [Iris Shader 教程](https://tt432.github.io/iris-shader-tutorial/)：参考水体通道分工、屏幕空间反射与后处理组织。
 - [BSL Shaders](https://bitslablab.com/bslshaders/)（CaptTatsu）：本对照分支依据本机 BSL Standard v7.0p1 的步进、细化、误差半径、屏幕边界混合与快速 FXAA 参数独立适配；反射波纹参考其五层双向噪声、远波与法线衰减，水面调色参考 128/192/255 配比，相机速度模糊限定在倒影上。颜色、深度、天空及水面输入接入 Luculent 原有管线。未分发 BSL 原包或其美术资产。
 - [GPU Gems 3 空间划分](https://developer.nvidia.com/gpugems/gpugems3/part-v-physics-simulation/chapter-32-broad-phase-collision-detection-cuda)：参考保守候选索引与精确几何检查的分工。

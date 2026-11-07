@@ -1,32 +1,39 @@
-#define SIMPLE_VARYING in
-layout(location=0) out vec4 fullOut0;
-layout(location=1) out vec4 fullOut1;
-layout(location=2) out vec4 fullOut2;
-layout(location=3) out vec4 fullOut3;
-layout(location=4) out vec4 fullOut4;
-/* 场景合成后的泛光亮部预过滤；首个 alpha 纹素保存每帧一次的太阳可见度。 */
-/* RENDERTARGETS: 3 */
-/* HDR 泛光：先逐样本提取亮部再降采样，随后执行可分离过滤。
- * 缓冲只使用左下有效视口，所有读取限制到有效纹素中心，避免采到旧天空/体积场。
- * 阈值和峰值限制先于平均，保留细小光源并抑制极亮像素的闪烁。
- */
-#include "/lib/core/bloom_composite12.glsl"
-
-/* 镜头光学近似：太阳的遮挡感知光晕与轻度径向色差。
- * 光晕亮度只在亮部阶段的首个纹素计算一次，再通过附件 alpha 传递。
- */
-#include "/lib/core/lens_optics_composite12.glsl"
-
+// TAA resolves HDR and publishes next-frame history plus camera state.
+/* RENDERTARGETS: 0,13 */
+layout(location=0) out vec4 sceneOut;
+layout(location=1) out vec4 historyOut;
+#include "/settings.glsl"
+#include "/lib/uniforms.glsl"
+#include "/lib/core/common.glsl"
+#include "/lib/water/surface_data_history.glsl"
 uniform sampler2D colortex0;
+uniform sampler2D colortex9;
+uniform sampler2D colortex1;
 uniform sampler2D depthtex0;
+uniform sampler2D depthtex2;
+#include "/lib/post/history.glsl"
+#include "/lib/post/temporal.glsl"
+#include "/lib/post/exposure.glsl"
 
 void main() {
-    vec2 uv = gl_FragCoord.xy / bloomSize();
-    float visibility = 0.0;
-    if (gl_FragCoord.x < 1.0 && gl_FragCoord.y < 1.0) {
-        visibility = lensSunVisibility(colortex0, depthtex0);
+    ivec2 pixel = ivec2(gl_FragCoord.xy);
+    vec2 uv = gl_FragCoord.xy / vec2(viewWidth, viewHeight);
+    bool valid = postHistoryValid(colortex13);
+    float depth;
+    vec3 color = postTemporalResolve(pixel, uv, valid, depth);
+    sceneOut = vec4(color, 1.0);
+    historyOut = vec4(color, depth);
+    if (pixel.y == 0) {
+        if (pixel.x == 0) {
+            vec2 medium = isEyeInWater == 1 ? estimateWaterMedium(colortex9) : vec2(0.0);
+            historyOut = vec4(medium, float(frameCounter), isEyeInWater == 1 ? 4183.0 : 0.0);
+        } else if (pixel.x == 1) {
+            historyOut = postUpdateExposureFocus(valid);
+        } else if (pixel.x == 2) {
+            historyOut = vec4(float(frameCounter), viewWidth, viewHeight, POST_HISTORY_SIGNATURE);
+        } else if (pixel.x == 3) {
+            historyOut = vec4(postRawProjection()[0][0], postRawProjection()[1][1],
+                float(isEyeInWater), valid ? 1.0 : 0.0);
+        }
     }
-    vec3 bloom = prefilterBloom(colortex0, uv);
-    fullOut0 = vec4(bloom, visibility);
 }
-

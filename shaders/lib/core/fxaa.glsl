@@ -19,6 +19,16 @@ vec3 filterDisplayEdges(sampler2D scene, vec2 uv) {
     vec3 centre = displaySample(scene, uv, pixel);
 #if AA_MODE == 0 || DEBUG_VIEW != 0
     return centre;
+#elif AA_MODE == 3
+    // TAA 后的轻度锐化；限制在相邻颜色范围，避免亮边与暗边。
+    vec3 north = displaySample(scene, uv + vec2(0.0, pixel.y), pixel);
+    vec3 south = displaySample(scene, uv - vec2(0.0, pixel.y), pixel);
+    vec3 east = displaySample(scene, uv + vec2(pixel.x, 0.0), pixel);
+    vec3 west = displaySample(scene, uv - vec2(pixel.x, 0.0), pixel);
+    vec3 low = min(centre, min(min(north, south), min(east, west)));
+    vec3 high = max(centre, max(max(north, south), max(east, west)));
+    vec3 sharpened = centre + (centre - (north + south + east + west) * 0.25) * TAA_SHARPNESS;
+    return clamp(sharpened, low, high);
 #else
     float middle = displayLuma(centre);
     float nw = displayLuma(displaySample(scene, uv + pixel * vec2(-1.0, 1.0), pixel));

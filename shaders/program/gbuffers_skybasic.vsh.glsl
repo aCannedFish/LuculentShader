@@ -73,7 +73,8 @@ void main() {
     // 天空穹顶直接投影到屏幕。
     // 天空没有"阴影"概念，所以 vShadowClipPos 留空（写 0），
     // 片元着色器也不会去读它。
-    gl_Position = (projectionMatrix * modelViewMatrix) * vec4(vaPosition + nativeModelOffset(), 1.0);
+    gl_Position = postJitterPosition((projectionMatrix * modelViewMatrix)
+        * vec4(vaPosition + nativeModelOffset(), 1.0));
 
     // 原版天空的颜色是"逐顶点渐变"的：天顶一种颜色、地平线一种颜色，
     // 中间靠插值过渡。顶点颜色由 vaColor 提供。
