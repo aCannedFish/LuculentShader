@@ -1,5 +1,6 @@
 // Water optical stage 11: surface and atmosphere composition.
 /* RENDERTARGETS: 0 */
+#define LUCULENT_WATER_COMPOSITION
 #include "/lib/water/pipeline.glsl"
 
 void main() {

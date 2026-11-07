@@ -608,6 +608,9 @@ vec3 waterInterfaceNormal(vec3 position, vec3 originWorld, float sky) {
 uniform sampler2D colortex15;
 #include "/lib/water_distant.glsl"
 #include "/lib/reflections/bsl_water_reflection.glsl"
+#ifdef LUCULENT_WATER_COMPOSITION
+#include "/lib/reflections/bsl_reflection_blur.glsl"
+#endif
 
 // 折射改变水底的投影位置；吸收仍由采样处的真实水内距离决定。
 vec3 applyWaterReflection(vec3 color, vec2 uv, float normalVariance) {
@@ -632,26 +635,30 @@ vec3 applyWaterReflection(vec3 color, vec2 uv, float normalVariance) {
     float coherence = 1.0 / (1.0 + roughness);
     // 水下窗口需要清晰的波浪起伏；水上倒影使用更平缓的光学斜率，
     // 避免同一组放大法线把相邻倒影拉成相互交叠的碎片。
-    vec3 reflectionNormal = waterMirrorNormal(position, opticalNormal, normal, distantWaterBlend(position));
+    vec3 reflectionNormal = waterMirrorNormal(position);
     float weight = bslWaterFresnel(dot(reflectionNormal, -incident))
         * WATER_REFLECTION_STRENGTH;
     if (weight > 0.001) {
+#ifdef LUCULENT_WATER_COMPOSITION
+        reflected = bslWaterReflectionBlur(uv, position);
+#else
         reflected = texelFetch(colortex15, ivec2(gl_FragCoord.xy), 0).rgb;
+#endif
         reflected *= WATER_REFLECTION_BRIGHTNESS;
     }
     // 倒影直接与透射混合：夜晚、雨天的天空暗而灰，水面也随之变暗、变灰。
-    vec3 result = mix(transmitted, reflected, weight);
+    vec3 result = mix(bslWaterSurfaceColour(transmitted), reflected, weight);
 
     vec4 shadowClip = shadowProjection * shadowModelView * gbufferModelViewInverse * vec4(position, 1.0);
     float directSky = smoothstep(0.80, 0.99, surface.b);
     if (directSky > 0.001 && WATER_REFLECTION_STRENGTH * WATER_SPECULAR_STRENGTH > 0.0) {
-        float directVisibility = waterOpaqueShadow(shadowClip, normal, length(position)) * directSky;
+        float directVisibility = waterOpaqueShadow(shadowClip, reflectionNormal, length(position)) * directSky;
         directVisibility *= cloudProjectedShadow(originWorld,
             normalize(mat3(gbufferModelViewInverse) * getLightDirView()));
         // 随机噪声法线的高频成分比正弦多，高光下限略放宽，避免远处一片细碎白点。
         float glintRoughness = sqrt(sqrt(pow4(max(WATER_ROUGHNESS * 0.6, 0.15))
                                        + min(2.0 * normalVariance, 0.035)));
-        result += waterDirectSpecular(normal, position, glintRoughness) * directVisibility
+        result += waterDirectSpecular(reflectionNormal, position, glintRoughness) * directVisibility
                 * WATER_REFLECTION_STRENGTH * WATER_SPECULAR_STRENGTH * coherence;
     }
     result = applyFog(result, length(position));

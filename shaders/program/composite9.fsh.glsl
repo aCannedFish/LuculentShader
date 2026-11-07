@@ -16,8 +16,7 @@ void main() {
     if (surface.a <= 0.001 || WATER_REFLECTION_STRENGTH <= 0.0) return;
     vec2 uv = gl_FragCoord.xy / vec2(viewWidth, viewHeight);
     vec3 position = waterSurfacePosition(uv, surface.a);
-    vec3 normal = waterInterfaceNormal(position, viewToAbsoluteWorld(position), surface.b);
-    vec3 mirrorNormal = waterMirrorNormal(position, normal, decodeWaterNormal(surface.xy), distantWaterBlend(position));
+    vec3 mirrorNormal = waterMirrorNormal(position);
     vec3 direction = reflect(normalize(position), mirrorNormal);
     vec4 reflected = traceBslWaterReflection(colortex6, depthtex2, position, mirrorNormal);
     vec3 sky = waterEnvironment(viewToAbsoluteWorld(position),

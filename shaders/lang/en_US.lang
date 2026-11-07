@@ -55,6 +55,8 @@ option.DEBUG_VIEW = Debug View
 
 option.WATER_ROUGHNESS=Water Roughness
 option.WATER_REFLECTION_STRENGTH=Water Reflection Strength
+option.WATER_REFLECTION_MOTION_BLUR=Reflection Motion Blur
+option.WATER_REFLECTION_MOTION_BLUR.comment=BSL-style camera blur on reflections only. Refraction stays sharp.
 
 screen.WATER=Water
 option.ENABLE_WATER_TEXTURE=Water Texture

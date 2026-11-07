@@ -40,18 +40,12 @@ vec3 waterAirDirection(vec3 position, vec3 opticalNormal) {
     return normalize(ray + up * max(elevation - dot(up, ray), 0.0));
 }
 
-// Keep coherent reflection motion within a small angular footprint. The
-// physical wave normal still serves transmission and surface highlights.
-vec3 waterMirrorNormal(vec3 position, vec3 opticalNormal, vec3 detailNormal, float lod) {
-    vec3 up = mat3(gbufferModelView) * vec3(0.0, 1.0, 0.0);
-    vec3 tilt = (opticalNormal - up * dot(up, opticalNormal)) * 0.18;
-#if ENABLE_WATER_WAVES == 1
-    vec3 ripple = detailNormal - opticalNormal;
-    float strength = 0.002 * WATER_WAVE_STRENGTH * (1.0 - lod)
-        * smoothstep(0.0, 0.16, dot(up, -normalize(position)));
-    tilt += ripple * (strength / (0.10 + length(ripple)));
-#endif
-    return waterBoundImageNormal(up, tilt);
+#include "/lib/reflections/bsl_water_surface.glsl"
+
+// Air-side appearance has its own BSL wave field; the displaced Snell
+// interface and all distant transmission helpers below retain their inputs.
+vec3 waterMirrorNormal(vec3 position) {
+    return bslWaterReflectionNormal(position, viewToAbsoluteWorld(position), vec3(0.0, 1.0, 0.0));
 }
 
 // One Snell ray meets a local bed-height estimate, then samples a real opaque

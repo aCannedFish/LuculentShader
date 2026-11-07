@@ -410,6 +410,10 @@ const vec4 colortex9ClearColor = vec4(0.0, 0.0, 0.0, 0.0);
 #ifndef WATER_ROUGHNESS
 #define WATER_ROUGHNESS 0.25 // [0.04 0.08 0.12 0.18 0.25 0.35]
 #endif
+#ifndef WATER_REFLECTION_MOTION_BLUR
+#define WATER_REFLECTION_MOTION_BLUR 1 // [0 1]
+#endif
+
 #ifndef WATER_REFLECTION_STRENGTH
 #define WATER_REFLECTION_STRENGTH 1.0 // [0.0 0.15 0.3 0.45 0.6 0.75 1.0]
 #endif

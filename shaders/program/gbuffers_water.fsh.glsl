@@ -109,6 +109,7 @@ layout(r32ui, binding=5) uniform uimage2D colorimg5;
 #endif
 #include "/lib/water_face_cache.glsl"
 #include "/lib/reflections/bsl_water_reflection.glsl"
+#include "/lib/reflections/bsl_water_surface.glsl"
 #include "/lib/water_interface_ray.glsl"
 #include "/lib/water_sheet.glsl"
 in float vWaterRestHeight;
@@ -161,17 +162,22 @@ vec4 waterStreamLayer(vec3 world, vec3 face, vec3 view, vec3 illumination, vec3 
     vec3 baseView = mat3(gbufferModelView) * face;
     if (dot(baseView, -incident) < 0.0) baseView = -baseView;
     vec3 mirrorNormal = waterBoundImageNormal(baseView, normalView - baseView);
+    if (isEyeInWater == 0) {
+        mirrorNormal = bslWaterReflectionNormal(vViewPos, world, mat3(gbufferModelViewInverse) * baseView);
+    }
     vec3 reflected = isEyeInWater == 1 ? scatter : toLinearSpace(skyColor) * daylight;
     vec4 screenReflection = traceBslWaterReflection(colortex6, depthtex2, vViewPos, mirrorNormal);
     reflected = mix(reflected, screenReflection.rgb, screenReflection.a);
     // Missing screen information changes the radiance source, not Fresnel.
     // A fall must retain its sky/environment reflection when SSR leaves view.
     float fresnel = isEyeInWater == 1 ? waterDielectricFresnel(cosine, WATER_IOR)
-        : bslWaterFresnel(cosine);
+        : bslWaterFresnel(dot(mirrorNormal, -incident));
     float sheen = totalReflection ? 1.0 : fresnel * WATER_REFLECTION_STRENGTH;
-    vec3 radiance = (transmitted * (1.0 - absorption) + scatter * absorption)
-        * (1.0 - sheen) + reflected * sheen;
-    radiance += waterDirectSpecular(normalView, vViewPos, max(WATER_ROUGHNESS, 0.15))
+    vec3 body = transmitted * (1.0 - absorption) + scatter * absorption;
+    if (isEyeInWater == 0) body = bslWaterSurfaceColour(body);
+    vec3 radiance = body * (1.0 - sheen) + reflected * sheen;
+    radiance += waterDirectSpecular(isEyeInWater == 0 ? mirrorNormal : normalView,
+        vViewPos, max(WATER_ROUGHNESS, 0.15))
         * directVisibility * WATER_SPECULAR_STRENGTH * WATER_REFLECTION_STRENGTH;
     // The native triangles determine coverage. Vanilla texture alpha is a
     // blend-strength convention, not holes in this physical water interface.

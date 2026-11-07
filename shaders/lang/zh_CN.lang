@@ -49,6 +49,8 @@ option.DEBUG_VIEW = 调试视图
 
 option.WATER_ROUGHNESS=水面粗糙度
 option.WATER_REFLECTION_STRENGTH=水面反射强度
+option.WATER_REFLECTION_MOTION_BLUR=倒影运动模糊
+option.WATER_REFLECTION_MOTION_BLUR.comment=按BSL方式平滑移动中的倒影，折射与水底画面保持清晰。
 
 screen.WATER=水体
 option.ENABLE_WATER_TEXTURE=水面纹理
