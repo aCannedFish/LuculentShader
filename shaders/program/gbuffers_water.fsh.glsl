@@ -88,6 +88,7 @@ layout(location=4) out vec4 fullOut4;
 
 /* 水面局部光照与 GGX 高光；只供片元阶段使用。 */
 #include "/lib/water/water_lighting_water_forward.glsl"
+#include "/lib/water/water_volume_water.glsl"
 
 /* Surface material lighting shares solar transmission and the companion's
  * existing per-light visibility. Local specular is never gated by solar shadow.
@@ -122,30 +123,41 @@ vec4 waterStreamLayer(vec3 world, vec3 face, vec3 view, vec3 illumination, vec3 
     vec2 phase = vec2(dot(world, across) * 3.0, dot(world, downhill) * 0.9 - frameTimeCounter * 0.9);
     vec3 waves = waterValueNoise(phase) * (1.0 - smoothstep(0.12, 0.55, footprint));
     float streak = waves.x;
-    vec3 filmNormal = normalize(face - 0.025 * waves.y * across - 0.012 * waves.z * downhill);
+    // As in Photon, vertical falls suppress the top-surface normal ripple.
+    // Their advected density still moves without fragmenting the reflected image.
+    float ripple = smoothstep(0.0, 0.35, abs(face.y));
+    vec3 filmNormal = normalize(face - ripple * (0.025 * waves.y * across + 0.012 * waves.z * downhill));
     if (dot(filmNormal, view) < 0.0) filmNormal = -filmNormal;
     vec3 normalView = mat3(gbufferModelView) * filmNormal;
     vec3 incident = normalize(vViewPos);
     float cosine = clamp(dot(filmNormal, view), 0.0, 1.0);
     // A thin sheet primarily attenuates the background equally in RGB. Use
     // the pond's scattering palette only for the small in-scattered term.
-    float thickness = (0.11 + 0.24 * WATER_SURFACE_OPACITY) * mix(1.45, 1.0, cosine);
-    thickness *= 1.0 + 0.16 * streak;
-    float absorption = 1.0 - exp(-thickness);
+    float pathLength = 0.0;
     vec3 scatter = waterScatteringAlbedo(biome) * illumination * 0.6 * nativeColour;
     float ior = mix(1.0, WATER_IOR, WATER_REFRACTION_STRENGTH);
     float eta = isEyeInWater == 1 ? ior : 1.0 / ior;
     vec3 inside = refract(incident, normalView, eta);
     bool totalReflection = dot(inside, inside) < 0.001;
-    vec3 backing = texelFetch(colortex6, ivec2(gl_FragCoord.xy), 0).rgb;
-    vec3 shift = vec3(0.0);
+    ivec2 pixel = ivec2(gl_FragCoord.xy);
+    vec3 backing = isEyeInWater == 1 ? texelFetch(colortex15, pixel, 0).rgb
+        : texelFetch(colortex6, pixel, 0).rgb;
+    vec3 transmitted = backing;
     if (!totalReflection && isEyeInWater == 1) {
         // From inside the water this boundary exits into air once. Keep the
         // outgoing Snell direction all the way to the pre-hand receiver.
-        shift = waterSheetTransmission(colortex15, depthtex2, vViewPos, normalView, inside, far, backing);
+        transmitted = sampleWaterSheet(colortex15, depthtex2, vViewPos, normalView, inside, far, pathLength);
     } else if (!totalReflection) {
-        shift = waterSheetTransmission(colortex6, depthtex1, vViewPos, normalView, inside, 0.24, backing);
+        vec3 restPosition = vec3(world.x, vWaterRestHeight + cameraPosition.y, world.z);
+        float exitT = waterSheetCellExit(world, restPosition, face,
+            mat3(gbufferModelViewInverse) * inside);
+        transmitted = sampleWaterSheet(colortex6, depthtex1, vViewPos, normalView, inside, exitT, pathLength);
     }
+    // A sheet occupies a bounded water segment. Its far-side air path is
+    // not a continuation of water; the camera-side underwater volume is later.
+    float mediumPath = isEyeInWater == 1 ? 0.0 : min(pathLength, 1.75);
+    float extinction = luma(waterExtinctionCoefficient()) + WATER_SURFACE_OPACITY * 3.0;
+    float absorption = 1.0 - exp(-extinction * mediumPath * (1.0 + 0.16 * streak));
     vec3 baseView = mat3(gbufferModelView) * face;
     if (dot(baseView, -incident) < 0.0) baseView = -baseView;
     vec3 mirrorNormal = waterBoundImageNormal(baseView, normalView - baseView);
@@ -164,13 +176,16 @@ vec4 waterStreamLayer(vec3 world, vec3 face, vec3 view, vec3 illumination, vec3 
     // A fall must retain its sky/environment reflection when SSR leaves view.
     float sheen = totalReflection ? 1.0 : waterDielectricFresnel(cosine,
         isEyeInWater == 1 ? WATER_IOR : 1.0 / WATER_IOR) * WATER_REFLECTION_STRENGTH;
-    float opacity = absorption * (1.0 - sheen) + sheen;
-    vec3 radiance = scatter * absorption * (1.0 - sheen) + reflected * sheen + shift * (1.0 - opacity);
+    vec3 radiance = (transmitted * (1.0 - absorption) + scatter * absorption)
+        * (1.0 - sheen) + reflected * sheen;
     radiance += waterDirectSpecular(normalView, vViewPos, max(WATER_ROUGHNESS, 0.15))
         * directVisibility * WATER_SPECULAR_STRENGTH * WATER_REFLECTION_STRENGTH;
     // The native triangles determine coverage. Vanilla texture alpha is a
     // blend-strength convention, not holes in this physical water interface.
-    return vec4(radiance / max(opacity, 0.0001), clamp(opacity, 0.0, 1.0));
+    // This already includes transmission through both interfaces. A later
+    // fluid face must not apply the same signed correction to an altered base.
+    radiance = mix(backing, radiance, 1.0 - getFogFactor(length(vViewPos)));
+    return vec4(radiance, 1.0);
 }
 
 void main() {
@@ -253,7 +268,7 @@ void main() {
         // The backing has already travelled through the camera fog. Fade the
         // film's contrast with distance so it does not add a second fog colour.
         color = layer.rgb;
-        albedo.a = layer.a * (1.0 - getFogFactor(viewDistance));
+        albedo.a = layer.a;
     } else if (water) {
         color = waterDiffuse(albedo.rgb, normalView, lmCoord, directVisibility, vViewPos);
         scatteringRadiance = color;

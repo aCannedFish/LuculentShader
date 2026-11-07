@@ -30,7 +30,7 @@ SIMPLE_VARYING vec3 vUnderwaterScatter;
  * The first texel is frame metadata and never contributes shaft radiance. */
 #include "/lib/water/water_shafts_filter.glsl"
 
-// 反射源刻意把天空留黑；水下出射必须从天空表恢复背景，并让实际几何继续遮挡它。
+// 水下出射按深度区分几何与天空；天空方向从统一天空表恢复，实际几何继续遮挡它。
 vec3 underwaterBackgroundColor(vec2 uv) {
     if (texture(depthtex1, uv).r < 0.999999) {
         return texture(underwaterOpaqueSource, uv).rgb;

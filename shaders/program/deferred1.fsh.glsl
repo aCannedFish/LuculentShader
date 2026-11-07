@@ -6,7 +6,7 @@ layout(location=3) out vec4 fullOut3;
 layout(location=4) out vec4 fullOut4;
 layout(location=5) out vec4 fullOut5;
 /* Supply the sky before translucent blending, and preserve opaque HDR for water. */
-/* RENDERTARGETS: 6,0,1,2 */
+/* RENDERTARGETS: 6,0,1,2,15 */
 uniform sampler2D colortex1;
 /* The entire uncovered background shares one atmosphere and celestial model. */
 #include "/lib/atmosphere/sky_background_deferred_surface.glsl"
@@ -35,6 +35,9 @@ uniform sampler2D depthtex0;
 #if ENABLE_MATERIAL_REFLECTIONS == 1
 const bool colortex0MipmapEnabled = false;
 #endif
+
+uniform sampler2D colortex15;
+uniform sampler2D depthtex2;
 
 void main() {
     vec2 uv = gl_FragCoord.xy / vec2(viewWidth, viewHeight);
@@ -114,6 +117,15 @@ void main() {
     // Glass writes depth. Filling its background afterwards would leave black
     // behind every nonzero-alpha texel, even though clear glass holes look fine.
     fullOut1 = vec4(color, 1.0);
+    // Sheet transmission needs radiance even where no opaque receiver exists.
+    // Keep alpha zero for sky so geometric traces continue to reject it.
+    if (depth >= 0.999999) reflectionSource.rgb = color;
+    // Opaque hands have already rendered on some loader paths. Retain the
+    // independently captured colour and depth at those pixels; only fill sky.
+    float preHandDepth = texelFetch(depthtex2, ivec2(gl_FragCoord.xy), 0).r;
+    vec3 preHandColour = depth == preHandDepth ? color
+        : fillSkyBackground(texelFetch(colortex15, ivec2(gl_FragCoord.xy), 0).rgb, uv, preHandDepth);
+    fullOut4 = vec4(preHandColour, 1.0);
     // 雾色差留到透明物与天气混合后统一修正，避免与 composite2 重复着色。
     // 常规路径的反射源已包含相机雾；同步其天空色，避免雨天倒影保留旧蓝雾。
     // 主画面仍在透明物与雨层合成后独立修正，不重复修改显示颜色。
