@@ -5,7 +5,7 @@
 #ifndef SETTINGS_GLSL
 #define SETTINGS_GLSL
 #ifndef ENABLE_COLOURED_LIGHTING
-#define ENABLE_COLOURED_LIGHTING 0 // [0 1]
+#define ENABLE_COLOURED_LIGHTING 1 // [0 1]
 #endif
 
 // Local diffuse transport runs independently of the direct coloured-light switch.
