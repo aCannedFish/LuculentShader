@@ -33,27 +33,15 @@ in vec3 mc_Entity;
 */
 #include "/lib/surface/vertex_transform.glsl"
 
-uniform sampler2D gtexture;
-uniform sampler2D gaux2;
-uniform sampler2D gaux1;
-uniform float rainBiome;
 flat SIMPLE_VARYING float vRainDraw;
 
-// Identify the submitted sprite once per vertex. Vanilla rain and snow are
-// both 64x256, and resource packs can change both their colours and dimensions.
-// Ambiguous identical sprites follow the local precipitation classification.
+// Minecraft 1.21.11 submits rain with fixed U endpoints 0/1. Snow adds a
+// per-column horizontal wind offset. Read that native geometry convention;
+// cross-loading the other weather sprite during an Iris draw can upload a
+// texture inside an active Minecraft render pass and crash the client.
 float nativeRainDraw() {
-    ivec2 size = textureSize(gtexture, 0);
-    bool rain = all(equal(size, textureSize(gaux2, 0)));
-    bool snow = all(equal(size, textureSize(gaux1, 0)));
-    for (int i = 0; i < 16 && rain && snow; ++i) {
-        vec2 point = fract(vec2(0.37, 0.61) + float(i) * vec2(0.381966, 0.618034));
-        ivec2 pixel = min(ivec2(point * vec2(size)), size - 1);
-        vec4 value = texelFetch(gtexture, pixel, 0);
-        rain = all(equal(value, texelFetch(gaux2, pixel, 0)));
-        snow = all(equal(value, texelFetch(gaux1, pixel, 0)));
-    }
-    return rain ? (snow ? step(0.5, rainBiome) : 1.0) : 0.0;
+    bool rain = vaUV0.x == 0.0 || vaUV0.x == 1.0;
+    return rain ? 1.0 : 0.0;
 }
 
 void main() {
