@@ -16,8 +16,19 @@ float postMeterExposure() {
         }
     }
     float average = exp2(sum / max(total, EPSILON));
-    return clamp(0.18 / max(average, 0.0001), AUTO_EXPOSURE_MIN,
-        max(AUTO_EXPOSURE_MAX, AUTO_EXPOSURE_MIN));
+    float night = 0.0;
+    float rain = 0.0;
+#if SIMPLE_DIMENSION == 0
+    vec3 sun = safeNormalize(mat3(gbufferModelViewInverse) * sunPosition, vec3(0.0, 1.0, 0.0));
+    night = 1.0 - smoothstep(-0.16, 0.12, sun.y);
+    rain = clamp(rainStrength, 0.0, 1.0);
+#endif
+    // 保留雨夜的环境亮度差异，避免把暗场统一补偿到白天的中灰。
+    float key = mix(0.18, 0.035, night) * mix(1.0, 0.70, rain);
+    float maximum = mix(AUTO_EXPOSURE_MAX, min(AUTO_EXPOSURE_MAX, AUTO_EXPOSURE_NIGHT_MAX), night);
+    maximum = mix(maximum, min(maximum, AUTO_EXPOSURE_RAIN_MAX), rain);
+    return clamp(key / max(average, 0.0001), AUTO_EXPOSURE_MIN,
+        max(maximum, AUTO_EXPOSURE_MIN));
 }
 
 // 五点中位数过滤中心轮廓变化；焦点响应按秒计算。
@@ -50,16 +61,24 @@ vec4 postUpdateExposureFocus(bool valid) {
 #if ENABLE_AUTO_EXPOSURE == 1
     target = postMeterExposure();
 #endif
+    float targetEv = log2(target);
+    float filteredEv = targetEv;
     float exposure = target;
     float focus = postFocusDistance();
     if (valid && old.x > 0.0 && old.y > 0.0) {
-        float rate = target < old.x ? 3.0 : 1.0;
-        float response = 1.0 - exp(-min(frameTime, 0.25) * rate * AUTO_EXPOSURE_SPEED);
-        exposure = exp2(mix(log2(old.x), log2(target), response));
-        focus = exp2(mix(log2(old.y), log2(focus), 1.0 - exp(-min(frameTime, 0.25) * 6.0)));
+        // 测光目标先低通，再以有限档数/秒接近目标；长帧不瞬间追赶曝光。
+        float elapsed = clamp(frameTime, 0.0, 0.05);
+        float response = 1.0 - exp(-elapsed * 2.0 * AUTO_EXPOSURE_SPEED);
+        filteredEv = mix(old.z, targetEv, response);
+        float previousEv = log2(old.x);
+        float rate = filteredEv < previousEv ? 1.5 : 0.75;
+        float limit = elapsed * rate * AUTO_EXPOSURE_SPEED;
+        exposure = exp2(previousEv + clamp(filteredEv - previousEv, -limit, limit));
+        focus = exp2(mix(log2(old.y), log2(focus), 1.0 - exp(-elapsed * 6.0)));
     }
 #if ENABLE_AUTO_EXPOSURE == 0
     exposure = 1.0;
+    filteredEv = 0.0;
 #endif
-    return vec4(exposure, focus, target, 1.0);
+    return vec4(exposure, focus, filteredEv, POST_CAMERA_SIGNATURE);
 }

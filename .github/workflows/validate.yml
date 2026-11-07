@@ -16,25 +16,30 @@ jobs:
         gi: [1]
         loader: [optifine, iris]
         post_lens: [0]
+        taa: [1]
         include:
           - preset: LOW
             colored: 0
             gi: 0
             loader: optifine
+            taa: 0
           - preset: LOW
             colored: 0
             gi: 0
             loader: iris
+            taa: 0
           - preset: ULTRA
             colored: 1
             gi: 1
             loader: optifine
             post_lens: 1
+            taa: 1
           - preset: ULTRA
             colored: 1
             gi: 1
             loader: iris
             post_lens: 1
+            taa: 1
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -49,6 +54,7 @@ jobs:
           GI: ${{ matrix.gi }}
           LOADER: ${{ matrix.loader }}
           POST_LENS: ${{ matrix.post_lens || 0 }}
+          TAA: ${{ matrix.taa }}
         run: |
           python3 - <<'PY'
           import os
@@ -63,6 +69,7 @@ jobs:
           profile = re.search(r'^profile\.' + os.environ['PRESET'] + r'\s*=([^\n]+)', properties, re.M)[1]
           options = dict(item.split('=', 1) for item in profile.split())
           options['ENABLE_COLOURED_LIGHTING'] = os.environ['COLORED']
+          options['ENABLE_TAA'] = os.environ['TAA']
           if os.environ['GI'] == '0':
               options['GI_QUALITY'] = '0'
           if os.environ['POST_LENS'] == '1':

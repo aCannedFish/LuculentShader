@@ -48,7 +48,7 @@ vec3 postTemporalResolve(ivec2 pixel, vec2 uv, bool valid, out float storedDepth
     bool hand = postHandPixel(depthtex0, depthtex2, uv);
     storedDepth = sky ? 0.0 : postLinearDepth(depth) * (hand ? -1.0 : 1.0);
     vec3 centre = max(texelFetch(colortex0, pixel, 0).rgb, vec3(0.0));
-#if AA_MODE != 3 || DEBUG_VIEW != 0
+#if ENABLE_TAA == 0 || DEBUG_VIEW != 0
     return centre;
 #else
     if (!valid) {

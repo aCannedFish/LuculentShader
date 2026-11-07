@@ -16,7 +16,7 @@ float chunkBoundaryFade(float horizontalDistance) {
 // 新区块沿原生加载进度逐渐增加覆盖率；无额外纹理或世界数据。
 float chunkFadeThreshold(vec2 pixel) {
     vec2 position = floor(pixel);
-#if AA_MODE == 3
+#if ENABLE_TAA == 1
     position += float(frameCounter & 7) * vec2(5.588238, 3.117312);
 #endif
     return fract(52.9829189 * fract(dot(position, vec2(0.06711056, 0.00583715))));

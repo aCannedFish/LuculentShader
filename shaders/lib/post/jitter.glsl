@@ -3,7 +3,7 @@
 #define LIB_POST_JITTER_GLSL
 
 vec2 postJitter(int frame) {
-#if AA_MODE == 3 && DEBUG_VIEW == 0
+#if ENABLE_TAA == 1 && DEBUG_VIEW == 0
     const vec2 sequence[8] = vec2[8](
         vec2(0.0, -1.0 / 3.0), vec2(-0.5, 1.0 / 3.0),
         vec2(0.5, -7.0 / 9.0), vec2(-0.75, -1.0 / 9.0),

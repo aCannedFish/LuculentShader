@@ -40,6 +40,8 @@
 #define ENABLE_RAIN_PUDDLES 1 // [0 1]
 #define RAIN_RIPPLE_STRENGTH 1.0 // [0.0 0.5 1.0 1.5]
 #define RAIN_FOG_STRENGTH 1.0 // [0.0 0.5 1.0 1.5]
+#define RAIN_FOG_ALTITUDE 80.0 // [64.0 80.0 96.0 112.0 128.0]
+#define PUDDLE_REFLECTION_STRENGTH 1.0 // [0.0 0.25 0.5 0.75 1.0]
 const float wetnessHalflife = 50.0;
 const float drynessHalflife = 160.0;
 
@@ -484,9 +486,12 @@ const vec4 colortex9ClearColor = vec4(0.0, 0.0, 0.0, 0.0);
  * 六、后处理
  * ==========================================================================*/
 
-// 抗锯齿：关闭、快速 FXAA、质量 FXAA、HDR 时域抗锯齿。
+// TAA 独立开关。画质预设不修改用户的抗锯齿选择。
+#define ENABLE_TAA 1 // [0 1]
+
+// 关闭 TAA 后使用的空间抗锯齿：关闭、快速 FXAA、质量 FXAA。
 #ifndef AA_MODE
-#define AA_MODE 3 // [0 1 2 3]
+#define AA_MODE 1 // [0 1 2]
 #endif
 
 // TAA 的历史权重与输出锐化；动态表面还会接受深度和颜色变化约束。
@@ -510,6 +515,8 @@ const vec4 colortex9ClearColor = vec4(0.0, 0.0, 0.0, 0.0);
 #define ENABLE_AUTO_EXPOSURE 1 // [0 1]
 #define AUTO_EXPOSURE_MIN 0.5 // [0.25 0.35 0.5 0.75 1.0]
 #define AUTO_EXPOSURE_MAX 4.0 // [1.0 2.0 4.0 6.0 8.0]
+#define AUTO_EXPOSURE_NIGHT_MAX 1.25 // [0.75 1.0 1.25 1.5 2.0 3.0 4.0]
+#define AUTO_EXPOSURE_RAIN_MAX 1.5 // [0.75 1.0 1.25 1.5 2.0 3.0 4.0]
 #define AUTO_EXPOSURE_SPEED 1.0 // [0.5 1.0 1.5 2.0]
 
 // 调色强度为零时保持基础色调映射；白平衡在线性 HDR 中执行。

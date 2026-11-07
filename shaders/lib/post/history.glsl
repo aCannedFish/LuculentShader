@@ -3,7 +3,19 @@
 #define LIB_POST_HISTORY_GLSL
 
 const float POST_HISTORY_SIGNATURE = 7310.0 + float(SIMPLE_DIMENSION) * 100.0
-    + float(AA_MODE);
+    + float(AA_MODE) + float(ENABLE_TAA) * 10.0;
+
+// 曝光与焦点只校验相机状态的布局，不因 TAA 拒绝重投影而失去适应历史。
+const float POST_CAMERA_SIGNATURE = 9187.0 + float(SIMPLE_DIMENSION) * 16.0;
+
+bool postCameraHistoryValid(sampler2D history) {
+    vec4 state = texelFetch(history, ivec2(1, 0), 0);
+    vec2 size = texelFetch(history, ivec2(2, 0), 0).yz;
+    return frameCounter > 0 && !any(isnan(state)) && !any(isinf(state))
+        && state.x > 0.0 && state.y > 0.0
+        && abs(state.w - POST_CAMERA_SIGNATURE) < 0.5
+        && all(lessThan(abs(size - vec2(viewWidth, viewHeight)), vec2(0.5)));
+}
 
 bool postReservedPixel(ivec2 pixel) {
     return pixel.y == 0 && pixel.x < 4;

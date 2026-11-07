@@ -25,9 +25,10 @@ uniform sampler2D colortex1;
 
 /* 雨后地表薄水层。湿度控制积累与消退，连续噪声给出局部积水分布。
  * 法线、原生天光和已有地表高度共同限制范围，避免墙面、树叶与屋内地板积水。
- * 不改变世界几何；水膜使用粗糙光泽、局部高光与雨滴波环。
+ * 不改变世界几何；水膜使用镜面倒影、局部高光与雨滴波环。
  */
 #include "/lib/core/wet_surface.glsl"
+#include "/lib/reflections/puddle_reflection.glsl"
 
 uniform sampler2D colortex0;
 uniform sampler2D colortex2;
@@ -88,7 +89,7 @@ void main() {
         relative = viewToWorld(screenToView(uv, min(depth, 0.99999)));
         footprint = max(length(dFdx(relative.xz)), length(dFdy(relative.xz)));
     }
-    if (wetActive && depth < 0.999999) {
+    if (wetActive && !viewmodel && depth < 0.999999) {
         vec4 geometry = texture(colortex1, uv);
         if (abs(geometry.a - MAT_WET_GROUND) < 0.025) {
             vec3 normal = decodeNormal(geometry.rg);
@@ -97,7 +98,7 @@ void main() {
             float metallic = texture(colortex2, uv).a;
             vec2 wet = wetGroundCoverage(relative, worldNormal, geometry.b, metallic, footprint);
             color *= 1.0 - wet.x * 0.12 - wet.y * 0.18;
-            if (wet.y > 0.015) {
+            if (wet.y > 0.015 && PUDDLE_REFLECTION_STRENGTH > 0.0) {
                 vec3 position = screenToView(uv, depth);
                 vec3 view = normalize(-position);
                 vec2 lightmap = texture(colortex2, uv).rg;
@@ -107,19 +108,23 @@ void main() {
                 original.metallic = metallic;
                 vec3 oldEnvironment = materialAmbientEnvironment(worldNormal, lightmap)
                     * materialEnvironmentWeight(original, dot(normal, view)) * MATERIAL_REFLECTION_STRENGTH;
+                oldEnvironment *= float(ENABLE_MATERIAL_REFLECTIONS);
                 SurfaceMaterial coating;
                 coating.f0 = vec3(0.025);
-                coating.roughness = max(0.35, MATERIAL_GLOSS_ROUGHNESS);
+                coating.roughness = 0.065;
                 coating.metallic = 0.0;
                 vec3 wetNormal = wetSurfaceNormal(normal, relative, wet.y, footprint);
                 vec3 wetWorld = normalize(mat3(gbufferModelViewInverse) * wetNormal);
-                vec3 environment = materialAmbientEnvironment(wetWorld, lightmap)
-                    * materialEnvironmentWeight(coating, dot(wetNormal, view));
+                float fresnel = 0.02 + 0.98 * pow(1.0 - max(dot(wetNormal, view), 0.0), 5.0);
+                vec3 mirror = puddleMirrorRadiance(colortex15, depthtex2, position, wetNormal);
                 vec3 tangent = mat3(gbufferModelView) * vec3(1.0, 0.0, 0.0);
                 vec3 direct = materialDirectSpecular(coating, wetNormal, position, lightmap, vec3(1.0))
                     + pbrLocalGloss(coating, wetNormal, tangent, position, 0.0);
-                color = max(color + (environment - oldEnvironment + direct) * wet.y
-                    * (1.0 - getFogFactor(length(position))), vec3(0.0));
+                vec3 substrate = max(color - oldEnvironment, vec3(0.0));
+                vec3 coated = substrate * (1.0 - fresnel) + mirror * fresnel + direct;
+                float coatingWeight = wet.y * PUDDLE_REFLECTION_STRENGTH
+                    * (1.0 - getFogFactor(length(position)));
+                color = mix(color, coated, coatingWeight);
             }
         }
     }

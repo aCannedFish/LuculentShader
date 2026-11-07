@@ -28,7 +28,7 @@ void main() {
             vec2 medium = isEyeInWater == 1 ? estimateWaterMedium(colortex9) : vec2(0.0);
             historyOut = vec4(medium, float(frameCounter), isEyeInWater == 1 ? 4183.0 : 0.0);
         } else if (pixel.x == 1) {
-            historyOut = postUpdateExposureFocus(valid);
+            historyOut = postUpdateExposureFocus(postCameraHistoryValid(colortex13));
         } else if (pixel.x == 2) {
             historyOut = vec4(float(frameCounter), viewWidth, viewHeight, POST_HISTORY_SIGNATURE);
         } else if (pixel.x == 3) {

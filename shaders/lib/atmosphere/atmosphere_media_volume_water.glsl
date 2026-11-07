@@ -12,6 +12,7 @@
  * not seed fog. Header-relative coordinates survive OptiFine origin rebasing.
  */
 #include "/lib/atmosphere/ground_fog.glsl"
+#include "/lib/atmosphere/rain_fog.glsl"
 
 bool localAtmosphereEnabled() {
     if (isEyeInWater != 0 || FOG_DENSITY <= 0.0) {
@@ -22,7 +23,7 @@ bool localAtmosphereEnabled() {
 #elif SIMPLE_DIMENSION == 1
     return END_ATMOSPHERE > 0.0;
 #else
-    return groundFogEnabled();
+    return groundFogEnabled() || nativeRainFogEnabled();
 #endif
 }
 
@@ -78,16 +79,27 @@ vec4 integrateLocalAtmosphere(vec2 uv, float sceneDistance) {
         float density;
         vec3 source;
 #if SIMPLE_DIMENSION == 0
-        float coverage;
-        vec4 field = sampleTerrainFog(relative.xz, terrainOrigin, terrainMetadata, coverage);
-        density = terrainMistDensity(relative, field, coverage, noiseOrigin + relative.xz);
+        float coverage = 0.0;
+        vec4 field = vec4(0.0);
+        if (hasTerrainAtmosphere()) {
+            field = sampleTerrainFog(relative.xz, terrainOrigin, terrainMetadata, coverage);
+            density = terrainMistDensity(relative, field, coverage, noiseOrigin + relative.xz);
+        } else {
+            density = nativeRainFogDensity(relative);
+        }
         if (density <= 0.000001) {
             previous = next;
             continue;
         }
-        vec3 sky = mix(toLinearSpace(skyColor) * 0.40, vec3(0.018, 0.030, 0.050), getNightFactor());
+        vec3 sky = toLinearSpace(skyColor) * mix(0.30, 0.06, getNightFactor());
         sky = mix(sky, vec3(luma(sky)) * vec3(0.92, 0.96, 1.0), weatherRainAmount());
         source = sky + twilightIrradiance(vec3(0.0, 1.0, 0.0)) * 0.55;
+#if ENABLE_COLOURED_LIGHTING == 1 || GI_QUALITY > 0
+        if (index % 2 == 0) {
+            localGlow = lpvSample(cameraPosition + relative);
+        }
+        source += localGlow * 0.12;
+#endif
         if (any(greaterThan(solar, vec3(0.0)))) {
 #if ENABLE_SHADOWS == 1
             if (index - (index / 2) * 2 == 0) {
