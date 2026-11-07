@@ -242,3 +242,9 @@ option.WATER_WAVE_STRENGTH.comment = 调整波高和水面细波的明暗对比�
 
 option.WATER_FILTER_STRENGTH=水面倒影滤波
 option.WATER_FILTER_STRENGTH.comment=按接收面距离过滤倒影噪点，设为零关闭。
+
+option.AA_MODE=抗锯齿
+value.AA_MODE.0=关闭
+value.AA_MODE.1=FXAA 快速
+value.AA_MODE.2=FXAA 质量
+option.AA_MODE.comment=在色调映射后平滑高对比度边缘。

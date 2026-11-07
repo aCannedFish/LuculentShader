@@ -18,6 +18,8 @@ NASA SVS 说明未另行标注的内容属于公共领域，可下载、使用�
 - [LabPBR 1.3 材质标准](https://github.com/shaderLABS/LabPBR/wiki)
 - [Filament 透射与吸收材质](https://google.github.io/filament/main/materials.html)
 - [SIGGRAPH 2016 实时体积云](https://advances.realtimerendering.com/s2016/)
+- [NVIDIA FXAA 算法说明](https://developer.download.nvidia.com/assets/gamedev/files/sdk/11/FXAA_WhitePaper.pdf)：参考显示空间边缘检测、端点搜索和子像素重建方法。
+- [Iris Shader 教程](https://tt432.github.io/iris-shader-tutorial/)：参考水体通道分工、屏幕空间反射与后处理组织。
 - [Narkowicz 的 ACES 曲线拟合](https://knarkowicz.wordpress.com/2016/01/06/aces-filmic-tone-mapping-curve/)：保留其简化拟合系数，仅映射亮度并加入本项目的色域约束。原作者允许按 CC0 或 MIT 使用该拟合。
 
 上述项目和资料维持各自的著作权与许可。本项目未将 Minecraft、OptiFine 或用户存档纳入源代码及发布包。

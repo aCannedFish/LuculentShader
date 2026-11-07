@@ -483,6 +483,11 @@ const vec4 colortex9ClearColor = vec4(0.0, 0.0, 0.0, 0.0);
  * 六、后处理
  * ==========================================================================*/
 
+// Display-space edge antialiasing: off, fast FXAA, quality FXAA.
+#ifndef AA_MODE
+#define AA_MODE 1 // [0 1 2]
+#endif
+
 // 色调映射曲线。0 = 不处理（直接截断，容易死白），
 // 1 = ACES 近似（电影感，推荐），2 = Reinhard（简单，对比度低）。
 #ifndef TONEMAP_MODE

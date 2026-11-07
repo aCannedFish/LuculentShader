@@ -247,3 +247,9 @@ option.WATER_WAVE_STRENGTH.comment = Controls moving wave height and visible rip
 
 option.WATER_FILTER_STRENGTH=Water reflection filter
 option.WATER_FILTER_STRENGTH.comment=Depth-guided denoising of reflected radiance; zero disables it.
+
+option.AA_MODE=Anti-aliasing
+value.AA_MODE.0=Off
+value.AA_MODE.1=FXAA Fast
+value.AA_MODE.2=FXAA Quality
+option.AA_MODE.comment=Smooth high-contrast edges after tone mapping.
