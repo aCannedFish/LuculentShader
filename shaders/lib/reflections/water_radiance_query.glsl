@@ -13,10 +13,10 @@ bool waterEnvironmentReceiverIsCoherent(WaterEnvironmentSupport support) {
     vec3 source = (gbufferModelView * vec4(relative, 1.0)).xyz;
     vec2 uv;
     if (!waterCameraSees(source, uv)) return false;
-    ivec2 pixel = ivec2(uv * vec2(textureSize(depthtex1, 0)));
+    ivec2 pixel = ivec2(uv * vec2(textureSize(depthtex2, 0)));
     float tag = texelFetch(colortex6, pixel, 0).a;
     if (tag < 0.5 || tag > 2.5 || fract(tag) == 0.5) return false;
-    vec3 normal = waterBedNormal(uv, source, depthtex1);
+    vec3 normal = waterBedNormal(uv, source, depthtex2);
     vec3 axis = abs(normal);
     int major = axis.x > max(axis.y, axis.z) ? 0 : (axis.y > axis.z ? 1 : 2);
     if (axis[major] < 0.9999) return false;
@@ -34,7 +34,7 @@ vec4 waterRefineEnvironmentReceiver(vec3 origin, vec3 ray, float estimate,
                                     WaterEnvironmentSupport support, out bool outsideReceiver) {
     outsideReceiver = false;
     bool boundedReceiver = waterEnvironmentReceiverIsCoherent(support);
-    ivec2 size = textureSize(depthtex1, 0);
+    ivec2 size = textureSize(depthtex2, 0);
     vec3 up = mat3(gbufferModelView) * vec3(0.0, 1.0, 0.0);
     float distance = estimate;
     for (int iteration = 0; iteration < 3; ++iteration) {
@@ -44,13 +44,13 @@ vec4 waterRefineEnvironmentReceiver(vec3 origin, vec3 ray, float estimate,
         vec2 uv = clip.xy / clip.w * 0.5 + 0.5;
         ivec2 pixel = ivec2(floor(uv * vec2(size)));
         if (any(lessThan(pixel, ivec2(1))) || any(greaterThanEqual(pixel, size - 1))) return vec4(0.0);
-        float depth = texelFetch(depthtex1, pixel, 0).r;
+        float depth = texelFetch(depthtex2, pixel, 0).r;
         if (depth >= 0.999999) {
             outsideReceiver = boundedReceiver
-                && texelFetch(depthtex1, pixel + ivec2(1, 0), 0).r >= 0.999999
-                && texelFetch(depthtex1, pixel - ivec2(1, 0), 0).r >= 0.999999
-                && texelFetch(depthtex1, pixel + ivec2(0, 1), 0).r >= 0.999999
-                && texelFetch(depthtex1, pixel - ivec2(0, 1), 0).r >= 0.999999;
+                && texelFetch(depthtex2, pixel + ivec2(1, 0), 0).r >= 0.999999
+                && texelFetch(depthtex2, pixel - ivec2(1, 0), 0).r >= 0.999999
+                && texelFetch(depthtex2, pixel + ivec2(0, 1), 0).r >= 0.999999
+                && texelFetch(depthtex2, pixel - ivec2(0, 1), 0).r >= 0.999999;
             return vec4(0.0);
         }
         uv = (vec2(pixel) + 0.5) / vec2(size);
@@ -61,7 +61,7 @@ vec4 waterRefineEnvironmentReceiver(vec3 origin, vec3 ray, float estimate,
         if (tag > 2.5) {
             distance = dot(receiver - origin, ray);
         } else {
-            vec3 normal = mat3(gbufferModelView) * waterBedNormal(uv, receiver, depthtex1);
+            vec3 normal = mat3(gbufferModelView) * waterBedNormal(uv, receiver, depthtex2);
             float cosine = dot(normal, ray);
             if (cosine >= -0.001) return vec4(0.0);
             distance = dot(receiver - origin, normal) / cosine;
@@ -117,7 +117,7 @@ vec4 queryWaterRadiance(vec3 position, vec3 direction, float roughness, float sk
     vec3 up = mat3(gbufferModelView) * vec3(0.0, 1.0, 0.0);
     vec4 aboveWater = vec4(up, 0.01 - dot(up, position));
     ScreenReflectionHit screenHit = traceWaterImageDetailed(
-        colortex6, depthtex1, position, direction, 0.02, far,
+        colortex6, depthtex2, position, direction, 0.02, far,
         min(96, WATER_REFLECTION_STEPS + 16), aboveWater);
     WaterRayHit hit = WaterRayHit(screenHit.uv,
         screenHit.coverage > 0.0 ? screenHit.distance : -1.0,
@@ -141,7 +141,7 @@ vec4 queryWaterRadiance(vec3 position, vec3 direction, float roughness, float sk
             vec3 radiance;
             if (waterCameraSees(point, witness)) {
                 radiance = filteredWaterReflection(witness, distance,
-                    reflectionSceneDepth(depthtex1, witness), roughness).rgb;
+                    reflectionSceneDepth(depthtex2, witness), roughness).rgb;
                 radiance = waterBankLayer(witness, radiance, position);
             } else if (nativeHit) {
                 radiance = waterLightFace(material, faceNormal, point);
@@ -153,7 +153,7 @@ vec4 queryWaterRadiance(vec3 position, vec3 direction, float roughness, float sk
     }
     if (visible) {
         vec4 sampleColor = filteredWaterReflection(hit.uv, hit.distance,
-            reflectionSceneDepth(depthtex1, hit.uv), roughness);
+            reflectionSceneDepth(depthtex2, hit.uv), roughness);
         sampleColor.rgb = waterBankLayer(hit.uv, sampleColor.rgb, position);
         // At an uncertain or viewport-edge screen hit, transition to a local
         // scene observation when it describes the same range of receivers.

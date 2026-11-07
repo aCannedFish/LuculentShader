@@ -43,14 +43,18 @@ void main() {
     vec2 uv = gl_FragCoord.xy / vec2(viewWidth, viewHeight);
     float depth = texture(depthtex0, uv).r;
     vec4 opaque = texture(colortex0, uv);
+    vec4 worldSource = texelFetch(colortex15, ivec2(gl_FragCoord.xy), 0);
+    float preHandDepth = texelFetch(depthtex2, ivec2(gl_FragCoord.xy), 0).r;
+    bool viewmodel = depth != preHandDepth;
+    float sourceTag = viewmodel ? worldSource.a : opaque.a;
     // Source alpha packs coverage (bit 0) and cutout class (bit 1). It is not
     // a blend opacity: a leaf hole containing a wall keeps the wall's coverage.
-    float cutout = abs(texture(colortex1, uv).a - MAT_FOLIAGE) < 0.025 ? 2.0 : 0.0;
+    float cutout = !viewmodel && abs(texture(colortex1, uv).a - MAT_FOLIAGE) < 0.025 ? 2.0 : 0.0;
     // Preserve the existing opaque/cutout bands. Their fraction carries the
     // terrain plane for water intersections. Other draw types have no tag.
-    bool aquatic = opaque.a >= 16.0 && opaque.a <= 22.0;
-    bool rasterCutout = opaque.a >= 24.0 && opaque.a <= 30.0;
-    float faceTag = rasterCutout ? opaque.a - 16.0 : (aquatic ? opaque.a - 8.0 : opaque.a);
+    bool aquatic = sourceTag >= 16.0 && sourceTag <= 22.0;
+    bool rasterCutout = sourceTag >= 24.0 && sourceTag <= 30.0;
+    float faceTag = rasterCutout ? sourceTag - 16.0 : (aquatic ? sourceTag - 8.0 : sourceTag);
     float face = faceTag >= 9.0 && faceTag <= 14.0 ? round(faceTag - 8.0) : 0.0;
     if (rasterCutout) cutout = 2.0;
     if (aquatic) cutout = 4.0;
@@ -60,16 +64,20 @@ void main() {
         ivec2 last = textureSize(colortex0, 0) - 1;
         const ivec2 offsets[4] = ivec2[4](ivec2(-1, 0), ivec2(1, 0), ivec2(0, -1), ivec2(0, 1));
         for (int i = 0; i < 4; ++i) {
-            float other = texelFetch(colortex0, clamp(pixel + offsets[i], ivec2(0), last), 0).a;
-            if (other >= 9.0 && other <= 14.0 && other != opaque.a) crease |= 1 << i;
+            ivec2 neighbour = clamp(pixel + offsets[i], ivec2(0), last);
+            float other = texelFetch(colortex0, neighbour, 0).a;
+            if (other <= 1.0 && texelFetch(depthtex0, neighbour, 0).r != texelFetch(depthtex2, neighbour, 0).r) {
+                other = texelFetch(colortex15, neighbour, 0).a;
+            }
+            if (other >= 9.0 && other <= 14.0 && other != sourceTag) crease |= 1 << i;
         }
     }
-    vec4 reflectionSource = depth < 0.999999
+    vec4 reflectionSource = preHandDepth < 0.999999
         ? vec4(opaque.rgb, 1.0 + cutout + (face * 16.0 + float(crease)) / 256.0) : vec4(0.0);
     // Preserve the exact view-facing plane of native sprites. Sparse depth
     // neighbours around a particle do not describe its raster plane.
-    bool billboard = abs(texture(colortex1, uv).a - MAT_BILLBOARD) < 0.002;
-    if (billboard && depth < 0.999999) reflectionSource.a = 1.5;
+    bool billboard = !viewmodel && abs(texture(colortex1, uv).a - MAT_BILLBOARD) < 0.002;
+    if (billboard && preHandDepth < 0.999999) reflectionSource.a = 1.5;
     vec3 color = fillSkyBackground(opaque.rgb, uv, depth);
     // 方块只保留漫反射/粗糙Glossy，场景辐射仍单独发布给水面使用。
     bool wetActive = ENABLE_RAIN_PUDDLES == 1 && weatherGroundWetness() * RAIN_PUDDLES_STRENGTH > 0.001;
@@ -119,13 +127,14 @@ void main() {
     fullOut1 = vec4(color, 1.0);
     // Sheet transmission needs radiance even where no opaque receiver exists.
     // Keep alpha zero for sky so geometric traces continue to reject it.
-    if (depth >= 0.999999) reflectionSource.rgb = color;
-    // Opaque hands have already rendered on some loader paths. Retain the
-    // independently captured colour and depth at those pixels; only fill sky.
-    float preHandDepth = texelFetch(depthtex2, ivec2(gl_FragCoord.xy), 0).r;
+    // The display colour retains the viewmodel. Optical sources use the
+    // matching world colour, geometry tags and depth from before that layer.
     vec3 preHandColour = depth == preHandDepth ? color
-        : fillSkyBackground(texelFetch(colortex15, ivec2(gl_FragCoord.xy), 0).rgb, uv, preHandDepth);
+        : fillSkyBackground(worldSource.rgb, uv, preHandDepth);
     fullOut4 = vec4(preHandColour, 1.0);
+    if (depth != preHandDepth || preHandDepth >= 0.999999) {
+        reflectionSource.rgb = preHandColour;
+    }
     // 雾色差留到透明物与天气混合后统一修正，避免与 composite2 重复着色。
     // 常规路径的反射源已包含相机雾；同步其天空色，避免雨天倒影保留旧蓝雾。
     // 主画面仍在透明物与雨层合成后独立修正，不重复修改显示颜色。

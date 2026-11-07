@@ -21,7 +21,10 @@
  */
 #include "/lib/water/water_surface.glsl"
 
+#ifndef LUCULENT_WORLD_DEPTH_UNIFORM
+#define LUCULENT_WORLD_DEPTH_UNIFORM
 uniform sampler2D depthtex2;
+#endif
 SIMPLE_VARYING vec3 vUnderwaterTint;
 SIMPLE_VARYING vec3 vUnderwaterScatter;
 #define underwaterOpaqueSource colortex6
@@ -32,7 +35,7 @@ SIMPLE_VARYING vec3 vUnderwaterScatter;
 
 // 水下出射按深度区分几何与天空；天空方向从统一天空表恢复，实际几何继续遮挡它。
 vec3 underwaterBackgroundColor(vec2 uv) {
-    if (texture(depthtex1, uv).r < 0.999999) {
+    if (texture(depthtex2, uv).r < 0.999999) {
         return texture(underwaterOpaqueSource, uv).rgb;
     }
     vec3 direction = skyViewDirection(uv);
@@ -53,13 +56,13 @@ vec3 underwaterInterfaceReflection(vec3 interfaceView, vec3 direction, float wat
     vec3 fallback = vUnderwaterScatter
         + vec3(0.004, 0.012, 0.018) * UNDERWATER_MIN_VISIBILITY;
     vec3 down = mat3(gbufferModelView) * vec3(0.0, -1.0, 0.0);
-    ScreenReflectionHit hit = traceAdaptiveReflectionDetailed(underwaterOpaqueSource, depthtex1,
+    ScreenReflectionHit hit = traceAdaptiveReflectionDetailed(underwaterOpaqueSource, depthtex2,
         interfaceView + down * 0.025, direction, 0.03, 24.0,
         min(WATER_REFLECTION_STEPS, 16), vec4(down, 0.02 - dot(down, interfaceView)));
     if (hit.coverage <= 0.0) {
         return fallback;
     }
-    float depth = texture(depthtex1, hit.uv).r;
+    float depth = texture(depthtex2, hit.uv).r;
     vec3 world = viewToAbsoluteWorld(screenToView(hit.uv, min(depth, 0.99999)));
     if (depth >= 0.999999 || world.y > waterHeight + 0.02) {
         return fallback;

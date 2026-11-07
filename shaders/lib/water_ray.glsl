@@ -193,7 +193,10 @@ WaterRayHit traceWaterGeometry(vec2 uv, vec3 origin, vec3 direction, float range
                 if (preHand && texelFetch(depthtex1, pixel, 0).r != depth) flags = 0.0;
                 vec3 normal = mat3(gbufferModelView) * waterNormalFromSample(centre, point, depths, flags);
                 float denominator = dot(normal, direction);
-                bool cutout = flags > 2.5 || (preHand && flags == 0.0);
+                // An untagged world receiver hidden by the viewmodel
+                // has finite pixel support, rather than the hand's face plane.
+                bool hiddenByViewmodel = flags == 1.0 && texelFetch(depthtex1, pixel, 0).r != depth;
+                bool cutout = flags > 2.5 || (preHand && flags == 0.0) || hiddenByViewmodel;
                 // A labelled opaque back face exits a solid. A ray starting in
                 // water must have encountered an unseen entrance before it.
                 bool backFace = !cutout && fract(flags) > 0.0 && denominator >= 0.0;

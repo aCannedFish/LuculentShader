@@ -3,7 +3,6 @@
  */
 /* RENDERTARGETS: 14 */
 layout(location=0) out vec4 tile;
-uniform sampler2D depthtex1;
 uniform sampler2D depthtex2;
 uniform sampler2D colortex7;
 uniform int isEyeInWater;
@@ -15,8 +14,7 @@ void main() {
     for (int y = 0; y < 4; ++y) {
         for (int x = 0; x < 4; ++x) {
             ivec2 pixel = first + ivec2(x, y);
-            float depth = isEyeInWater == 1 ? texelFetch(depthtex2, pixel, 0).r
-                                            : texelFetch(depthtex1, pixel, 0).r;
+            float depth = texelFetch(depthtex2, pixel, 0).r;
             if (depth < 0.999999) {
                 vec4 point = gbufferProjectionInverse * vec4(0.0, 0.0, depth * 2.0 - 1.0, 1.0);
                 float z = -point.z / point.w;

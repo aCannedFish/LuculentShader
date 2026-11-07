@@ -191,15 +191,15 @@ void updateWaterEnvironment(ivec2 cell) {
         vec4 clip = gbufferProjection * vec4(view, 0.0);
         vec2 uv = clip.xy / clip.w * 0.5 + 0.5;
         if (all(greaterThan(uv, vec2(0.0))) && all(lessThan(uv, vec2(1.0)))) {
-            ivec2 p = ivec2(uv * vec2(textureSize(depthtex1,0)));
-            float depth = texelFetch(depthtex1,p,0).r;
+            ivec2 p = ivec2(uv * vec2(textureSize(depthtex2,0)));
+            float depth = texelFetch(depthtex2,p,0).r;
             vec4 radiance = texelFetch(colortex6,p,0);
             if (depth >= 0.999999) {
                 result.point = vec3(65504.0);
                 waterEnvironmentWrite(cell,result);
                 return;
             }
-            vec2 centre = (vec2(p) + 0.5) / vec2(textureSize(depthtex1,0));
+            vec2 centre = (vec2(p) + 0.5) / vec2(textureSize(depthtex2,0));
             vec3 point = screenToView(centre,depth);
             vec4 water = texelFetch(colortex9,p,0);
             if (length(point) > 1.0 && radiance.a > 1.0 && radiance.a < 4.5

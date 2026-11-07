@@ -245,6 +245,11 @@ void main() {
         ? 24.0 : 8.0;
     if (abs(vEntityId.x - 205.0) < 0.5) receiverClass = 16.0;
     fullOut0.a = receiverClass + receiverFace;
+    // Retain world geometry behind the later first-person colour/depth layer.
+    float sourceClass = foliage && receiverClass < 15.0 ? 24.0 : receiverClass;
+    if (isOpaqueTerrainStage()) {
+        fullOut4.a = sourceClass + receiverFace;
+    }
     fullOut2.a = pbr.metallic;
     fullOut3 = vec4(pbr.f0, sqrt(pbr.roughness));
 
