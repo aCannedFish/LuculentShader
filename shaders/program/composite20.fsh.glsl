@@ -10,7 +10,6 @@ in vec2 vScreenUv;
 #include "/lib/post/bloom.glsl"
 uniform sampler2D colortex0;
 uniform sampler2D colortex3;
-uniform sampler2D colortex13;
 #include "/lib/core/lens_optics_final.glsl"
 
 void main() {

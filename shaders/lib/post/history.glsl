@@ -1,12 +1,8 @@
-// C13 前四个纹素保存介质、曝光/焦点、帧状态及投影状态，其余保存 HDR 与线性深度。
+// C13 首五个纹素保存相机及闪电状态，其余保存 HDR 与线性深度。
 #ifndef LIB_POST_HISTORY_GLSL
 #define LIB_POST_HISTORY_GLSL
 
-const float POST_HISTORY_SIGNATURE = 7310.0 + float(SIMPLE_DIMENSION) * 100.0
-    + float(AA_MODE) + float(ENABLE_TAA) * 10.0;
-
-// 曝光与焦点只校验相机状态的布局，不因 TAA 拒绝重投影而失去适应历史。
-const float POST_CAMERA_SIGNATURE = 9187.0 + float(SIMPLE_DIMENSION) * 16.0;
+#include "/lib/post/history_layout.glsl"
 
 bool postCameraHistoryValid(sampler2D history) {
     vec4 state = texelFetch(history, ivec2(1, 0), 0);
@@ -18,7 +14,7 @@ bool postCameraHistoryValid(sampler2D history) {
 }
 
 bool postReservedPixel(ivec2 pixel) {
-    return pixel.y == 0 && pixel.x < 4;
+    return pixel.y == 0 && pixel.x < POST_METADATA_PIXELS;
 }
 
 // 分辨率、视场角、缺帧、传送和进出介质后重新收敛，避免沿用旧场景。

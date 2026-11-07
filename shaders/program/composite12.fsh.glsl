@@ -33,7 +33,9 @@ void main() {
             historyOut = vec4(float(frameCounter), viewWidth, viewHeight, POST_HISTORY_SIGNATURE);
         } else if (pixel.x == 3) {
             historyOut = vec4(postRawProjection()[0][0], postRawProjection()[1][1],
-                float(isEyeInWater), valid ? 1.0 : 0.0);
+                float(isEyeInWater), (valid ? 1.0 : 0.0) + (lightningGeometrySeen() ? 2.0 : 0.0));
+        } else if (pixel.x == 4) {
+            historyOut = lightningState();
         }
     }
 }

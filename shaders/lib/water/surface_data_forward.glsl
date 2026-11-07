@@ -5,7 +5,6 @@
 // block.properties 将水映射到此 ID，避免玻璃也产生波浪。
 const float WATER_BLOCK_ID = 100.0;
 const float WATER_IOR = 1.333;
-uniform sampler2D colortex13;
 
 #include "/lib/water_interface.glsl"
 

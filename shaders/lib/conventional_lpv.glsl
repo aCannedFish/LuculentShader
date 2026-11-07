@@ -13,7 +13,6 @@ uniform sampler2D colortex8;
 // J9 restores every shadow draw attachment during native terrain submission.
 // Fixed-size C5 is detached from the scene FBO and cannot be overwritten by
 // raster outputs. Image reads also avoid J9's forced LINEAR sampler filtering.
-layout(r32ui, binding=5) uniform uimage2D colorimg5;
 uniform sampler2D colortex10;
 uniform sampler2D colortex11;
 const int LPV_HEADER_SIZE = 2;

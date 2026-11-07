@@ -75,6 +75,13 @@ vec4 postUpdateExposureFocus(bool valid) {
         float limit = elapsed * rate * AUTO_EXPOSURE_SPEED;
         exposure = exp2(previousEv + clamp(filteredEv - previousEv, -limit, limit));
         focus = exp2(mix(log2(old.y), log2(focus), 1.0 - exp(-elapsed * 6.0)));
+#if ENABLE_AUTO_EXPOSURE == 1
+        // 短促电光保留真实峰值，不让自动曝光追逐闪光并在随后压暗环境。
+        if (lightningPulse(lightningState()) > 0.015) {
+            exposure = old.x;
+            filteredEv = old.z;
+        }
+#endif
     }
 #if ENABLE_AUTO_EXPOSURE == 0
     exposure = 1.0;

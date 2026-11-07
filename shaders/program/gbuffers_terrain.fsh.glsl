@@ -92,9 +92,6 @@ layout(location=4) out vec4 fullOut4;
 /* 资源包驱动的通用不透明表面。材质贴图保持线性数据，颜色由调用者转为线性空间。 */
 #include "/lib/surface/pbr_surface_terrain.glsl"
 
-#if ENABLE_COLOURED_LIGHTING == 0 && GI_QUALITY == 0
-layout(r32ui, binding=5) uniform uimage2D colorimg5;
-#endif
 #include "/lib/water_plant_surface.glsl"
 
 // Tag only genuinely axis-aligned raster faces. Derivatives are taken before

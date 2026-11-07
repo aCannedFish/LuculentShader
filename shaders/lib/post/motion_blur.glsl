@@ -5,7 +5,7 @@ vec3 postMotionBlur(vec2 uv) {
     return centre;
 #else
     vec4 state = texelFetch(colortex13, ivec2(3, 0), 0);
-    if (state.w < 0.5 || postHandPixel(depthtex0, depthtex2, uv)) {
+    if (mod(state.w, 2.0) < 0.5 || postHandPixel(depthtex0, depthtex2, uv)) {
         return centre;
     }
     float depth = textureLod(depthtex0, uv, 0.0).r;

@@ -73,6 +73,17 @@ layout(location=4) out vec4 fullOut4;
 #include "/lib/surface/pbr_surface_forward.glsl"
 
 void main() {
+#ifndef IS_IRIS
+    // 原生闪电使用加法混合；次要附件输出零，保留背后的场景记录。
+    if (entityId == LIGHTNING_ENTITY_ID) {
+        fullOut0 = vec4(lightningCoreRadiance(vColor.rgb), vColor.a);
+        fullOut1 = vec4(0.0);
+        fullOut2 = vec4(0.0);
+        fullOut3 = vec4(0.0);
+        fullOut4 = vec4(0.0);
+        return;
+    }
+#endif
     // 1. 材质颜色：贴图 × 顶点染色。
     //    生物的皮肤颜色、羊毛颜色、马的颜色等都在 vColor 里。
     vec2 materialUv = pbrParallaxUv(vTexCoord, vViewPos,

@@ -3,7 +3,6 @@
  */
 #include "/settings.glsl"
 #include "/lib/uniforms.glsl"
-layout(r32ui, binding=5) uniform uimage2D colorimg5;
 #include "/lib/water_face_cache.glsl"
 #include "/lib/water_entity_triangles.glsl"
 #include "/lib/water_plant_surface.glsl"

@@ -80,7 +80,6 @@ in vec3 at_midBlock;
 // The final C5 row is outside both voxel volumes. Only one vertex per frame
 // copies the 16 entries, shared by every secondary water hit.
 uniform sampler2D lightmap;
-layout(r32ui, binding=5) uniform uimage2D colorimg5;
 void captureWaterLightmap() {
     if ((gl_VertexID & 255) != 0) return;
     int row = imageSize(colorimg5).y - 1;

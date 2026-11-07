@@ -104,9 +104,6 @@ uniform sampler2D colortex15;
 // OptiFine binds the pre-hand depth at unit 12, but its gbuffer uniform setup
 // assigns only depthtex0/1. Keep this sampler off the default material unit.
 layout(binding=12) uniform sampler2D depthtex2;
-#if ENABLE_COLOURED_LIGHTING == 0 && GI_QUALITY == 0
-layout(r32ui, binding=5) uniform uimage2D colorimg5;
-#endif
 #include "/lib/water_face_cache.glsl"
 #include "/lib/reflections/bsl_water_reflection.glsl"
 #include "/lib/reflections/bsl_water_surface.glsl"

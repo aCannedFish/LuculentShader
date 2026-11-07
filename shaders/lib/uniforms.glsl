@@ -2,6 +2,7 @@
  */
 #ifndef LIB_UNIFORMS_GLSL
 #define LIB_UNIFORMS_GLSL
+#include "/settings.glsl"
 
 /* ============================================================================
  * 一、玩家摄像机的矩阵（gbuffer 系列）
@@ -109,6 +110,10 @@ uniform int moonPhase;
 
 // 雨的强度，范围 [0,1]。0 = 晴天，1 = 暴雨。
 uniform float rainStrength;
+uniform float lightningFlash;
+#ifdef IS_IRIS
+uniform vec4 lightningBoltPosition;
+#endif
 
 // 地表湿度，范围 [0,1]。下雨时会逐渐升高，雨停后缓慢下降。
 // 常用于让方块表面变暗、变光滑。
@@ -149,6 +154,16 @@ uniform vec4 entityColor;
 
 // 当前绑定的方块图集大小（单位：像素），做像素级贴图操作时需要。
 uniform ivec2 atlasSize;
+
+// 相机与闪电状态在多个阶段共享同一只读采样器，避免各入口重复声明。
+uniform sampler2D colortex13;
+// C5 的原生场景存储也保存短暂放电的两字元数据，不增加图像附件。
+layout(r32ui, binding=5) uniform uimage2D colorimg5;
+#ifndef IS_IRIS
+uniform int entityId;
+#endif
+#include "/lib/post/history_layout.glsl"
+#include "/lib/weather/lightning.glsl"
 
 // 所有屏幕重建与光栅化共用同一抖动投影，阴影投影保持独立。
 #include "/lib/post/jitter.glsl"

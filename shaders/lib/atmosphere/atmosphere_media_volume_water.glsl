@@ -62,6 +62,8 @@ vec4 integrateLocalAtmosphere(vec2 uv, float sceneDistance) {
         noiseOrigin = terrainMetadata.yz - terrainOrigin.xy;
     }
     vec3 solar = getSunLightColor() + getMoonLightColor();
+    vec4 bolt = lightningState();
+    float flash = lightningPulse(bolt);
     // 阴雨由天空漫射照亮低层雾，云影不再被放大成贯穿视野的明暗光柱。
     solar *= 1.0 - smoothstep(0.15, 0.85, weatherRainAmount());
     float phase = airScatteringPhase(dot(ray, normalize(mat3(gbufferModelViewInverse) * getLightDirView())));
@@ -94,6 +96,7 @@ vec4 integrateLocalAtmosphere(vec2 uv, float sceneDistance) {
         vec3 sky = toLinearSpace(skyColor) * mix(0.30, 0.06, getNightFactor());
         sky = mix(sky, vec3(luma(sky)) * vec3(0.92, 0.96, 1.0), weatherRainAmount());
         source = sky + twilightIrradiance(vec3(0.0, 1.0, 0.0)) * 0.55;
+        source += lightningFogIrradiance(cameraPosition + relative, bolt, flash);
 #if ENABLE_COLOURED_LIGHTING == 1 || GI_QUALITY > 0
         if (index % 2 == 0) {
             localGlow = lpvSample(cameraPosition + relative);

@@ -85,9 +85,6 @@ uniform sampler2D depthtex1;
 uniform sampler2D depthtex2;
 #endif
 
-#if ENABLE_COLOURED_LIGHTING == 0 && GI_QUALITY == 0
-layout(r32ui, binding=5) uniform uimage2D colorimg5;
-#endif
 vec3 waterLightmapLevel(float level) {
     ivec2 p = ivec2(clamp(level, 0.0, 15.0), imageSize(colorimg5).y - 1);
     return toLinearSpace(unpackUnorm4x8(imageLoad(colorimg5, p).r).rgb);

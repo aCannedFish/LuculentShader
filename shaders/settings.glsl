@@ -1,16 +1,17 @@
 /* 全局渲染设置。集中定义加载器常量、缓冲格式和可调宏；各程序共享同一组默认值。
  * 游戏内选项由 shaders.properties 分组，用户选择由加载器保存。
+ * 初始参数沿用本机 Fabric + Iris 的实际配置，画质预设仍按独立预算覆盖。
  */
 #ifndef SETTINGS_GLSL
 #define SETTINGS_GLSL
 #ifndef ENABLE_COLOURED_LIGHTING
-#define ENABLE_COLOURED_LIGHTING 1 // [0 1]
+#define ENABLE_COLOURED_LIGHTING 0 // [0 1]
 #endif
 
 // Local diffuse transport runs independently of the direct coloured-light switch.
 // Quality controls propagation work per frame; reflectance controls later bounces.
-#define GI_QUALITY 1 // [0 1 2 3]
-#define GI_MULTIBOUNCE 0 // [0 1]
+#define GI_QUALITY 2 // [0 1 2 3]
+#define GI_MULTIBOUNCE 1 // [0 1]
 
 // Parenthesized expressions keep this fixed compile-time marker out of the loader option scanner.
 #ifndef SIMPLE_DIMENSION
@@ -26,33 +27,35 @@
 // Atmosphere controls. Zero strength removes the corresponding GPU contribution.
 #define GROUND_FOG_STRENGTH 0.5 // [0.0 0.25 0.5 0.75 1.0]
 #define GROUND_FOG_HEIGHT 8.0 // [4.0 8.0 12.0 20.0]
-#define ATMOSPHERE_STEPS 6 // [6 10 16]
-#define AURORA_STRENGTH 0.8 // [0.0 0.4 0.8 1.2 1.6]
+#define ATMOSPHERE_STEPS 10 // [6 10 16]
+#define AURORA_STRENGTH 0.0 // [0.0 0.4 0.8 1.2 1.6]
 #define AURORA_SPEED 1 // [0 1 2 3]
-#define AURORA_STEPS 8 // [8 12 16]
+#define AURORA_STEPS 12 // [8 12 16]
 #define TWILIGHT_STRENGTH 0.7 // [0.0 0.35 0.7 1.05 1.4]
 #define NETHER_ATMOSPHERE 0.65 // [0.0 0.35 0.65 1.0]
 #define END_ATMOSPHERE 0.65 // [0.0 0.35 0.65 1.0]
 
 // 雨后积水与山林雨雾，强度为 0 时分别跳过对应的地表或体积计算。
 #define RAIN_PUDDLES_STRENGTH 0.75 // [0.0 0.35 0.75 1.0]
-#define ENABLE_REALISTIC_RAIN 1 // [0 1]
+#define ENABLE_REALISTIC_RAIN 0 // [0 1]
 #define ENABLE_RAIN_PUDDLES 1 // [0 1]
 #define RAIN_RIPPLE_STRENGTH 1.0 // [0.0 0.5 1.0 1.5]
 #define RAIN_FOG_STRENGTH 1.0 // [0.0 0.5 1.0 1.5]
 #define RAIN_FOG_ALTITUDE 80.0 // [64.0 80.0 96.0 112.0 128.0]
 #define PUDDLE_REFLECTION_STRENGTH 1.0 // [0.0 0.25 0.5 0.75 1.0]
+#define ENABLE_LIGHTNING 1 // [0 1]
+#define LIGHTNING_STRENGTH 1.0 // [0.5 0.75 1.0 1.5 2.0]
 const float wetnessHalflife = 50.0;
 const float drynessHalflife = 160.0;
 
 // Material reflections use a separate budget from the water renderer.
 #define ENABLE_MATERIAL_REFLECTIONS 1 // [0 1]
 #define MATERIAL_REFLECTION_STRENGTH 1.0 // [0.0 0.25 0.5 0.75 1.0]
-#define MATERIAL_REFLECTION_STEPS 24 // [16 24 32 48]
-#define MATERIAL_GLOSS_ROUGHNESS 0.45 // [0.35 0.45 0.55 0.65]
+#define MATERIAL_REFLECTION_STEPS 32 // [16 24 32 48]
+#define MATERIAL_GLOSS_ROUGHNESS 0.35 // [0.35 0.45 0.55 0.65]
 #define MATERIAL_ANISOTROPY 0.6 // [0.0 0.3 0.6 0.8]
-#define POM_QUALITY 1 // [0 1 2 3]
-#define POM_DISTANCE 32.0 // [16.0 32.0 48.0 64.0]
+#define POM_QUALITY 2 // [0 1 2 3]
+#define POM_DISTANCE 48.0 // [16.0 32.0 48.0 64.0]
 #define ORE_GLOW_STRENGTH 0.8 // [0.0 0.4 0.8 1.2 1.6]
 
 /* ============================================================================
@@ -61,12 +64,12 @@ const float drynessHalflife = 160.0;
 
 // 阴影贴图分辨率（正方形边长，单位像素）。由画质预设选择，也可在阴影页单独调整。
 // 越大阴影边缘越清晰，代价是显存占用和采样带宽线性增长。
-const int shadowMapResolution = 1024; // [1024 2048 3072 4096]
+const int shadowMapResolution = 2048; // [1024 2048 3072 4096]
 
 // 阴影的可见距离（单位：方块）。超出这个距离的物体不投射也不接收阴影。
 // 阴影贴图是一张正交投影图，覆盖范围越大，同样分辨率下每个像素代表的
 // 实际面积就越大，阴影就越糊 —— 这是分辨率与距离之间的直接权衡。
-const float shadowDistance = 64.0; // [64.0 96.0 128.0 160.0]
+const float shadowDistance = 96.0; // [64.0 96.0 128.0 160.0]
 
 // 让硬件做阴影贴图的深度比较过滤。
 // 使用手动深度比较、遮挡搜索和接收面斜率补偿。
@@ -165,7 +168,7 @@ const vec4 colortex9ClearColor = vec4(0.0, 0.0, 0.0, 0.0);
 // 方向光阴影质量。0 = 单点硬阴影；1 = 5 点遮挡搜索 + 8 点过滤，
 // 2 = 9 点搜索 + 12 点过滤。无遮挡时提前结束，半影随遮挡距离增大。
 #ifndef SHADOW_SOFTNESS
-#define SHADOW_SOFTNESS 0 // [0 1 2]
+#define SHADOW_SOFTNESS 1 // [0 1 2]
 #endif
 
 // 阴影贴图的畸变强度。OptiFine 的阴影贴图是正交投影，覆盖整个 shadowDistance
@@ -208,7 +211,7 @@ const vec4 colortex9ClearColor = vec4(0.0, 0.0, 0.0, 0.0);
 #define MOONLIGHT_STRENGTH 0.03 // [0.0 0.009 0.018 0.03 0.05 0.075]
 #endif
 #ifndef NIGHT_AMBIENT_STRENGTH
-#define NIGHT_AMBIENT_STRENGTH 0.04 // [0.0 0.02 0.04 0.06 0.08 0.12 0.16]
+#define NIGHT_AMBIENT_STRENGTH 0.0 // [0.0 0.02 0.04 0.06 0.08 0.12 0.16]
 #endif
 #ifndef NIGHT_EXPOSURE
 #define NIGHT_EXPOSURE 2.0 // [1.0 1.25 1.6 2.0 2.5]
@@ -216,12 +219,12 @@ const vec4 colortex9ClearColor = vec4(0.0, 0.0, 0.0, 0.0);
 
 // 局部光在日照阴影之外累加；平滑采样作用于光照，不模糊材质纹理。
 #ifndef BLOCK_LIGHT_STRENGTH
-#define BLOCK_LIGHT_STRENGTH 1.5 // [0.0 0.5 1.0 1.5 2.0 2.5 3.0 4.0]
+#define BLOCK_LIGHT_STRENGTH 0.5 // [0.0 0.5 1.0 1.5 2.0 2.5 3.0 4.0]
 #endif
 // 原版传播场换算为方块距离后进行有界平方衰减；6.0 对应基础校准。
 // 越大则光源外围越暗，原版零光照的值和边缘斜率仍严格为零。
 #ifndef BLOCK_LIGHT_FALLOFF
-#define BLOCK_LIGHT_FALLOFF 4.0 // [2.0 4.0 6.0 9.0 12.0 18.0]
+#define BLOCK_LIGHT_FALLOFF 6.0 // [2.0 4.0 6.0 9.0 12.0 18.0]
 #endif
 #ifndef SMOOTH_BLOCK_LIGHT
 #define SMOOTH_BLOCK_LIGHT 1 // [0 1]
@@ -327,7 +330,7 @@ const vec4 colortex9ClearColor = vec4(0.0, 0.0, 0.0, 0.0);
 
 // 天空积分仅在低分辨率查找表运行；体积云质量改变视线和光照采样预算。
 #ifndef SKY_SAMPLES
-#define SKY_SAMPLES 16 // [16 24 32]
+#define SKY_SAMPLES 24 // [16 24 32]
 #endif
 #ifndef SKY_HAZE
 #define SKY_HAZE 1.0 // [0.5 1.0 1.5 2.0 3.0]
@@ -340,10 +343,10 @@ const vec4 colortex9ClearColor = vec4(0.0, 0.0, 0.0, 0.0);
 #define CELESTIAL_SIZE 0.5 // [0.5 0.75 1.0 1.25 1.5 2.0]
 #endif
 #ifndef CLOUD_QUALITY
-#define CLOUD_QUALITY 0 // [0 1 2]
+#define CLOUD_QUALITY 1 // [0 1 2]
 #endif
 #ifndef CLOUD_COVERAGE
-#define CLOUD_COVERAGE 0.35 // [0.0 0.35 0.45 0.50 0.58 0.70 0.85 1.0]
+#define CLOUD_COVERAGE 0.45 // [0.0 0.35 0.45 0.50 0.58 0.70 0.85 1.0]
 #endif
 #ifndef CLOUD_DENSITY
 #define CLOUD_DENSITY 0.75 // [0.5 0.75 1.0 1.5 2.0]
@@ -362,7 +365,7 @@ const vec4 colortex9ClearColor = vec4(0.0, 0.0, 0.0, 0.0);
 
 // Physical displacement controls the coherent rays. Surface detail also varies
 // reflected energy and glints without steering the entire scenery by each ripple.
-#define WATER_WAVE_STRENGTH 1.5 // [0.5 0.75 1.0 1.25 1.5 1.75 2.0]
+#define WATER_WAVE_STRENGTH 2.0 // [0.5 0.75 1.0 1.25 1.5 1.75 2.0]
 
 // 无贴图水面保留暗青底色、少量群系染色、透明度与波浪；水的观感主要来自倒影。
 #ifndef ENABLE_WATER_TEXTURE
@@ -380,12 +383,12 @@ const vec4 colortex9ClearColor = vec4(0.0, 0.0, 0.0, 0.0);
 
 // 体积场内部视口：0 四分之一，1 二分之一；场景本体仍按原分辨率渲染。
 #ifndef VOLUMETRIC_RESOLUTION
-#define VOLUMETRIC_RESOLUTION 0 // [0 1]
+#define VOLUMETRIC_RESOLUTION 1 // [0 1]
 #endif
 
 // 日光散射的固定距离区间数；减少区间节省阴影查询，低角度细光束会更粗。
 #ifndef AIR_SCATTER_STEPS
-#define AIR_SCATTER_STEPS 16 // [16 24 32 48]
+#define AIR_SCATTER_STEPS 32 // [16 24 32 48]
 #endif
 
 // 近地面日光散射与丁达尔光束，0 关闭；低太阳高度与空间介质密度共同调节。
@@ -398,7 +401,7 @@ const vec4 colortex9ClearColor = vec4(0.0, 0.0, 0.0, 0.0);
 #define WATER_SURFACE_OPACITY 0.12 // [0.0 0.02 0.04 0.06 0.08 0.12 0.2]
 #endif
 #ifndef WATER_TURBIDITY
-#define WATER_TURBIDITY 0.035 // [0.0 0.015 0.035 0.06 0.1 0.16]
+#define WATER_TURBIDITY 0.015 // [0.0 0.015 0.035 0.06 0.1 0.16]
 #endif
 #ifndef WATER_ABSORPTION
 #define WATER_ABSORPTION 0.45 // [0.0 0.25 0.45 0.7 1.0 1.5]
@@ -421,17 +424,17 @@ const vec4 colortex9ClearColor = vec4(0.0, 0.0, 0.0, 0.0);
 #endif
 // 倒影中的体积云：0 查 deferred 预建的云环境表，1 逐像素步进体积云（更细致、成本更高）。
 #ifndef WATER_REFLECTION_CLOUDS
-#define WATER_REFLECTION_CLOUDS 0 // [0 1]
+#define WATER_REFLECTION_CLOUDS 1 // [0 1]
 #endif
 // 屏幕空间倒影每条光线的最大步数；命中后另有 10 次二分细化，步数主要决定细小物体是否被跳过。
 #ifndef WATER_REFLECTION_STEPS
-#define WATER_REFLECTION_STEPS 16 // [16 24 32 48 64]
+#define WATER_REFLECTION_STEPS 32 // [16 24 32 48 64]
 #endif
 // 倒影光线沿阴影贴图步进的次数（另有 5 次二分细化），找出桥底、树冠下方、
 // 树影里的山坡等相机看不到的遮挡；遮挡点明显更近时取代屏幕命中。
 // 水面与材质倒影共用，0 关闭并退回天光衰减。
 #ifndef REFLECTION_OCCLUSION_STEPS
-#define REFLECTION_OCCLUSION_STEPS 6 // [0 6 10 16]
+#define REFLECTION_OCCLUSION_STEPS 10 // [0 6 10 16]
 #endif
 
 // 深水保留有限的近处辨识能力，不对远景解除光程衰减。
@@ -444,7 +447,7 @@ const vec4 colortex9ClearColor = vec4(0.0, 0.0, 0.0, 0.0);
 #endif
 // 水下光柱的固定积分步数；与水底焦散质量独立。
 #ifndef WATER_SHAFT_STEPS
-#define WATER_SHAFT_STEPS 8 // [4 8 12 16 24]
+#define WATER_SHAFT_STEPS 12 // [4 8 12 16 24]
 #endif
 
 // 半分辨率水下日光散射强度，0 关闭积分；默认使用八步。
@@ -487,15 +490,15 @@ const vec4 colortex9ClearColor = vec4(0.0, 0.0, 0.0, 0.0);
  * ==========================================================================*/
 
 // TAA 独立开关。画质预设不修改用户的抗锯齿选择。
-#define ENABLE_TAA 1 // [0 1]
+#define ENABLE_TAA 0 // [0 1]
 
 // 关闭 TAA 后使用的空间抗锯齿：关闭、快速 FXAA、质量 FXAA。
 #ifndef AA_MODE
-#define AA_MODE 1 // [0 1 2]
+#define AA_MODE 2 // [0 1 2]
 #endif
 
 // TAA 的历史权重与输出锐化；动态表面还会接受深度和颜色变化约束。
-#define TAA_HISTORY_WEIGHT 0.90 // [0.80 0.85 0.90 0.95]
+#define TAA_HISTORY_WEIGHT 0.95 // [0.80 0.85 0.90 0.95]
 #define TAA_SHARPNESS 0.15 // [0.0 0.1 0.15 0.25 0.35]
 
 // 相机快门比例。0.5 对应约 180 度快门，半径以 1080p 像素计。
@@ -536,7 +539,7 @@ const vec4 colortex9ClearColor = vec4(0.0, 0.0, 0.0, 0.0);
 
 // 曝光。整体亮度的乘数，在色调映射之前作用。
 #ifndef EXPOSURE
-#define EXPOSURE 1.0 // [0.6 0.8 1.0 1.2 1.5]
+#define EXPOSURE 1.2 // [0.6 0.8 1.0 1.2 1.5]
 #endif
 
 // 饱和度。1.0 = 不变，<1 变灰，>1 变艳。
@@ -571,7 +574,7 @@ const vec4 colortex9ClearColor = vec4(0.0, 0.0, 0.0, 0.0);
 
 // 泛光强度：叠加回原图时的倍率。
 #ifndef BLOOM_STRENGTH
-#define BLOOM_STRENGTH 0.25 // [0.0 0.1 0.25 0.4 0.6]
+#define BLOOM_STRENGTH 0.4 // [0.0 0.1 0.25 0.4 0.6]
 #endif
 
 // 泛光半径倍率，以 1080p 为参考并限制采样间距。
@@ -587,7 +590,7 @@ const vec4 colortex9ClearColor = vec4(0.0, 0.0, 0.0, 0.0);
 #define ENABLE_LENS_FLARE 1 // [0 1]
 #endif
 #ifndef LENS_FLARE_STRENGTH
-#define LENS_FLARE_STRENGTH 0.18 // [0.0 0.1 0.18 0.3 0.5]
+#define LENS_FLARE_STRENGTH 0.3 // [0.0 0.1 0.18 0.3 0.5]
 #endif
 
 // 径向色差，强度为 1080p 画面角落的单侧像素偏移。
@@ -625,8 +628,8 @@ const vec4 colortex9ClearColor = vec4(0.0, 0.0, 0.0, 0.0);
 #define DEBUG_VIEW 0 // [0 1 2 3 4 5 6]
 #endif
 
-#define COLOURED_VOLUME_SIZE 32 // [32 48 64 96]
-#define COLOURED_LIGHT_STEPS 1 // [1 2 3 4]
+#define COLOURED_VOLUME_SIZE 96 // [32 48 64 96]
+#define COLOURED_LIGHT_STEPS 2 // [1 2 3 4]
 #define COLOURED_LIGHT_INTENSITY 1.0 // [0.0 0.5 0.75 1.0]
 #if ENABLE_COLOURED_LIGHTING == 1 || GI_QUALITY > 0
 /*

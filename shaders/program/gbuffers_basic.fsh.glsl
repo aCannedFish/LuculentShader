@@ -77,6 +77,17 @@ layout(location=4) out vec4 fullOut4;
 #include "/lib/atmosphere/fog_forward.glsl"
 
 void main() {
+#ifndef IS_IRIS
+    // 兼容将原生闪电送入 basic 的加载器路径，仍只叠加电弧颜色。
+    if (entityId == LIGHTNING_ENTITY_ID) {
+        fullOut0 = vec4(lightningCoreRadiance(vColor.rgb), vColor.a);
+        fullOut1 = vec4(0.0);
+        fullOut2 = vec4(0.0);
+        fullOut3 = vec4(0.0);
+        fullOut4 = vec4(0.0);
+        return;
+    }
+#endif
     /* -----------------------------------------------------------------------
      * 第一步：取材质颜色
      * basic 程序渲染的几何体没有贴图，颜色全部来自顶点颜色。

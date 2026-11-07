@@ -4,7 +4,6 @@
  */
 #include "/settings.glsl"
 #include "/lib/uniforms.glsl"
-layout(r32ui,binding=5) uniform uimage2D colorimg5;
 #include "/lib/water_face_cache.glsl"
 layout(local_size_x=256) in;
 const ivec3 workGroups = ivec3(128,1,1);

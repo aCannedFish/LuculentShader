@@ -5,7 +5,6 @@ layout(location=0) out vec4 sceneOut;
 #include "/lib/uniforms.glsl"
 #include "/lib/core/common.glsl"
 uniform sampler2D colortex0;
-uniform sampler2D colortex13;
 uniform sampler2D depthtex0;
 uniform sampler2D depthtex2;
 #include "/lib/post/history.glsl"

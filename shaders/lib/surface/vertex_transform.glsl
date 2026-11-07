@@ -72,6 +72,11 @@ void transformGBuffersVertex(vec3 position, vec3 normal, vec2 texCoord,
     // gbufferModelView 会漏掉区块平移，把大量顶点挤在原点附近。
     vec4 viewPos = modelViewMatrix * vec4(position, 1.0);
     vViewPos = viewPos.xyz;
+#ifndef IS_IRIS
+    if (entityId == LIGHTNING_ENTITY_ID) {
+        recordLightningGeometry((gbufferModelViewInverse * viewPos).xyz);
+    }
+#endif
 
     // --- 2. 视图空间 -> 裁剪空间 ---
     // 透视投影矩阵会把远处的顶点压向屏幕中心（近大远小），

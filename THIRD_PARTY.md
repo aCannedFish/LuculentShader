@@ -22,6 +22,7 @@ NASA SVS 说明未另行标注的内容属于公共领域，可下载、使用�
 - [SIGGRAPH 2014 实时渲染课程](https://www.advances.realtimerendering.com/s2014/index.html)：参考时域抗锯齿的 HDR 累积、重投影、历史拒绝和后处理顺序；本项目的实现独立编写。
 - [Iris 缓冲保留接口](https://shaders.properties/current/reference/constants/buffer_clear/)：参考持久颜色附件及下一帧历史的接口约定。
 - [Iris 区块渐入接口](https://shaders.properties/current/reference/attributes/mc_chunkfade/)：从加载器读取新区块的原生渐入进度。
+- [Iris 世界与天气接口](https://shaders.properties/current/reference/uniforms/world/)及[几何通道接口](https://shaders.properties/current/reference/programs/gbuffers/)：接入原生闪电位置及电弧几何，体积照明与 HDR 扩散独立实现。
 - [Complementary Reimagined](https://github.com/ComplementaryDevelopment/ComplementaryReimagined)：对照本机 r5.5.1 的重投影、邻域裁切和天空边界融合思路；算法独立适配，未引入其材质或美术资产。
 - [Photon](https://github.com/sixthsurge/photon)：对照本机源码的打包 Bloom 降采样、圆盘景深和运动模糊组织，保留本项目的颜色、深度与历史接口。
 - Derivative Main d24.4.14（本机安装包）：参考体积雾的高度衰减、三维密度团和透射率积分思路，独立适配至现有体积管线；不分发其源码或美术资产。

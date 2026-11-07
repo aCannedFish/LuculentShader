@@ -5,7 +5,6 @@
 // block.properties 将水映射到此 ID，避免玻璃也产生波浪。
 const float WATER_BLOCK_ID = 100.0;
 const float WATER_IOR = 1.333;
-uniform sampler2D colortex13;
 
 // 无偏振介质 Fresnel。eta 是入射侧/透射侧折射率，临界角外返回全反射。
 float waterDielectricFresnel(float cosine, float eta) {

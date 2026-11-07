@@ -59,6 +59,8 @@ vec4 traceVolumetricCloudsLit(vec3 origin, vec3 ray, float limit, bool reflectio
     ambient = mix(ambient, vec3(luma(ambient)) * vec3(0.90, 0.95, 1.0) * 0.70,
                   weatherRainAmount());
     float jitter = cloudCellHash(floor(gl_FragCoord.xy));
+    vec4 bolt = lightningState();
+    float flash = lightningPulse(bolt);
     vec3 accumulated = vec3(0.0);
     float transmission = 1.0;
     float previous = entry;
@@ -89,6 +91,7 @@ vec4 traceVolumetricCloudsLit(vec3 origin, vec3 ray, float limit, bool reflectio
         float aerial = exp(-length(position - origin) * mix(0.00016, 0.00035, rainStrength))
                      * cloudHorizonVisibility(position);
         source = mix(atmosphere, source * CLOUD_BRIGHTNESS, aerial);
+        source += lightningCloudIrradiance(position, bolt, flash);
         float segmentTransmission = exp(-density * stepLength * 0.04 * CLOUD_OPACITY);
         accumulated += transmission * (1.0 - segmentTransmission) * source;
         transmission *= segmentTransmission;

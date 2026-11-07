@@ -10,8 +10,9 @@ uniform mat4 modelViewMatrix;
 uniform mat4 projectionMatrix;
 uniform mat3 normalMatrix;
 #ifdef WATER_TRANSMISSION_PASS
-#include "/lib/water_storage_layout.glsl"
+// 此最小顶点入口不引用共享 uniforms，单独声明它使用的原生图像。
 layout(r32ui, binding=5) uniform uimage2D colorimg5;
+#include "/lib/water_storage_layout.glsl"
 uniform int frameCounter;
 uniform int isEyeInWater;
 flat out vec3 vGlassLower;

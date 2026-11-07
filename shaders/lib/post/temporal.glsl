@@ -51,7 +51,7 @@ vec3 postTemporalResolve(ivec2 pixel, vec2 uv, bool valid, out float storedDepth
 #if ENABLE_TAA == 0 || DEBUG_VIEW != 0
     return centre;
 #else
-    if (!valid) {
+    if (!valid || lightningPulse(lightningState()) > 0.015) {
         return centre;
     }
     vec3 previous = postPreviousPosition(uv, depth);

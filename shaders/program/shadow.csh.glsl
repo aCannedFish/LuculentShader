@@ -1,7 +1,4 @@
 #include "/lib/conventional_lpv.glsl"
-#if ENABLE_COLOURED_LIGHTING == 0 && GI_QUALITY == 0
-layout(r32ui, binding=5) uniform uimage2D colorimg5;
-#endif
 #include "/lib/water_face_cache.glsl"
 #include "/lib/water_plant_surface.glsl"
 #include "/lib/water_environment_layout.glsl"
@@ -16,6 +13,9 @@ const ivec3 workGroups = ivec3(768, 1, 1);
 void main() {
 #if SIMPLE_DIMENSION == 0
     int face = int(gl_GlobalInvocationID.x);
+    if (face == 0) {
+        imageStore(colorimg5, ivec2(31, imageSize(colorimg5).y - 1), uvec4(0u));
+    }
     if (isEyeInWater != 1 && face < waterPlantCells / 2) {
         imageStore(colorimg5, waterPlantAddress(face), uvec4(0u));
         imageStore(colorimg5, waterPlantAddress(face + waterPlantCells / 2), uvec4(0u));
