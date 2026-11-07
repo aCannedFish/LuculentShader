@@ -4,6 +4,8 @@
 // 球心在玩家水平位置下方 12000 格，纵向固定以保留世界云高。
 // 云层沿径向拥有厚度；天气纹理仍锚定世界坐标，移动时不会跟随玩家平移。
 const float CLOUD_SPHERE_RADIUS = 12000.0;
+// 单位方向的 y 分量等于仰角的正弦，主视图和云环境缓存共用下限。
+const float CLOUD_MIN_DIRECTION_Y = -sin(radians(6.0));
 
 vec2 cloudAltitudeBounds() {
     return vec2(CLOUD_HEIGHT - CLOUD_THICKNESS * 0.65,
@@ -23,13 +25,13 @@ float cloudRenderDistance() {
     return CLOUD_DISTANCE;
 }
 
-// 仰角 0 到 6 度逐渐恢复覆盖和密度，地平线以下不生成云。
+// 仰角从 −6 度升到水平线时逐渐恢复覆盖和密度。
 // 使用同一空间密度供主视图、反射与阴影采样，避免各路径出现不同云形。
 float cloudHorizonVisibility(vec3 world) {
     vec3 offset = world - cameraPosition;
     float distance = length(offset);
     float elevation = offset.y / max(distance, 0.001);
-    float angular = smoothstep(0.0, sin(radians(6.0)), elevation);
+    float angular = smoothstep(CLOUD_MIN_DIRECTION_Y, 0.0, elevation);
     float range = 1.0 - smoothstep(CLOUD_DISTANCE * 0.75, CLOUD_DISTANCE, distance);
     return angular * angular * range * range;
 }
@@ -53,14 +55,18 @@ bool cloudSphereRoots(vec3 origin, vec3 ray, float altitude, out vec2 roots) {
     return true;
 }
 
-// 取前方第一个球壳区间，再与玩家的上半空间和场景深度相交。
-// 内球内部从其远交点进入云层；外部射线在近交点处离开当前云段。
+// 用场景深度截断球壳。掠过内球时可能依次遇到近、远两段云，
+// 保留两段之间的积分范围，密度函数会跳过径向高度在云底以下的样本。
 bool cloudRayInterval(vec3 origin, vec3 ray, float limit, out float entry, out float exit) {
     entry = 0.0;
     exit = 0.0;
 #if SIMPLE_DIMENSION != 0
     return false;
 #endif
+    // 相机射线的仰角沿途恒定；偏移起点的反射和阴影按样本位置判断。
+    if (ray.y <= CLOUD_MIN_DIRECTION_Y && all(equal(origin, cameraPosition))) {
+        return false;
+    }
     vec2 altitude = cloudAltitudeBounds();
     vec2 outer;
     if (!cloudSphereRoots(origin, ray, altitude.y, outer)) {
@@ -70,21 +76,11 @@ bool cloudRayInterval(vec3 origin, vec3 ray, float limit, out float entry, out f
     exit = min(outer.y, min(limit, CLOUD_DISTANCE));
     vec2 inner;
     if (cloudSphereRoots(origin, ray, altitude.x, inner)) {
-        if (inner.x > entry) {
+        if (inner.x <= entry) {
+            entry = max(entry, inner.y);
+        } else if (inner.y >= exit) {
             exit = min(exit, inner.x);
-        } else if (inner.y > entry) {
-            entry = inner.y;
         }
-    }
-    if (abs(ray.y) > 0.000001) {
-        float horizon = (cameraPosition.y - origin.y) / ray.y;
-        if (ray.y > 0.0) {
-            entry = max(entry, horizon);
-        } else {
-            exit = min(exit, horizon);
-        }
-    } else if (origin.y <= cameraPosition.y) {
-        return false;
     }
     return exit > entry;
 }

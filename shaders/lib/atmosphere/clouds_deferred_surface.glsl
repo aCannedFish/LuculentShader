@@ -95,10 +95,10 @@ vec4 traceVolumetricCloudsFrom(vec3 origin, vec3 ray, float limit, bool reflecti
     return traceVolumetricCloudsLit(origin, ray, limit, reflection, skyAtmosphereRadiance(ray));
 }
 
-// 反射与水下视线共用的上半球云环境：deferred 每帧以天空 LUT 的映射构建，
+// 反射与水下视线共用的云环境：deferred 每帧以天空 LUT 的映射构建，
 // 存放在 colortex3 的 y∈[size.y, 2size.y)，rgb 为预乘辐射，a 为不透明度。
 vec4 cloudEnvironment(vec3 direction) {
-    if (direction.y <= 0.0 || CLOUD_OPACITY <= 0.0 || CLOUD_COVERAGE <= 0.0) {
+    if (direction.y <= CLOUD_MIN_DIRECTION_Y || CLOUD_OPACITY <= 0.0 || CLOUD_COVERAGE <= 0.0) {
         return vec4(0.0);
     }
     vec2 coordinate = skyLookupCoordinate(direction);

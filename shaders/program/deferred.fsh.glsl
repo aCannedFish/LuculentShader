@@ -27,7 +27,7 @@ layout(location=4) out vec4 fullOut4;
 vec4 buildCloudEnvironment(vec2 texel, vec2 size) {
     vec2 coordinate = vec2(texel.x / size.x, (texel.y - size.y - 0.5) / max(size.y - 1.0, 1.0));
     vec3 direction = skyLookupDirection(coordinate);
-    if (direction.y <= 0.0) {
+    if (direction.y <= CLOUD_MIN_DIRECTION_Y) {
         return vec4(0.0);
     }
     // 相机在云层之上时仍从云底以下观察，与水面所见一致。
