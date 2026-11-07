@@ -3,7 +3,8 @@
 #define LIB_LENS_OPTICS_GLSL
 
 vec2 lensSunUv() {
-    vec4 projected = gbufferProjection * vec4(normalize(sunPosition), 0.0);
+    // TAA 后的显示画面使用固定像素中心，镜头光晕不再跟随光栅抖动。
+    vec4 projected = postRawProjection() * vec4(normalize(sunPosition), 0.0);
     return projected.xy / max(projected.w, EPSILON) * 0.5 + 0.5;
 }
 
