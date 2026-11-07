@@ -25,9 +25,14 @@ vec4 traceBslWaterReflection(sampler2D scene, sampler2D depths, vec3 origin, vec
             || any(greaterThan(projected.xy, vec2(1.0)));
 
         float depth = textureLod(depths, sourceUv, 0.0).r;
-        vec3 receiver = screenToView(projected.xy, depth);
+        // Clear depth is not a surface. Keep its reconstruction finite, then
+        // reject it before refinement rather than treating the far plane as land.
+        vec3 receiver = screenToView(projected.xy, min(depth, 0.999999));
         float radius = 1.1 * pow(length(stride) * pow(length(offset), 0.11), 1.1);
-        if (length(position - receiver) < radius) {
+        // A screen occluder can lie behind the reflecting point. The loose
+        // search radius must never turn it into a forward reflected receiver.
+        if (depth < 0.999999 && dot(receiver - origin, reflectedDirection) > 0.0
+            && length(position - receiver) < radius) {
             refinements++;
             if (refinements == 4) {
                 vec4 colour = textureLod(scene, sourceUv, 0.0);
