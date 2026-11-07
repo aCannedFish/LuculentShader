@@ -245,8 +245,6 @@ option.COLOURED_LIGHT_STEPS.comment=Updates per frame. More updates converge fas
 option.WATER_WAVE_STRENGTH = Wave strength
 option.WATER_WAVE_STRENGTH.comment = Controls moving wave height and visible ripple contrast.
 
-option.WATER_FILTER_STRENGTH=Water reflection filter
-option.WATER_FILTER_STRENGTH.comment=Depth-guided denoising of reflected radiance; zero disables it.
 
 option.AA_MODE=Anti-aliasing
 value.AA_MODE.0=Off

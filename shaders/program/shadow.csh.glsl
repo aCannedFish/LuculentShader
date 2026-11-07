@@ -6,7 +6,6 @@ layout(r32ui, binding=5) uniform uimage2D colorimg5;
 #include "/lib/water_plant_surface.glsl"
 #include "/lib/water_environment_layout.glsl"
 #include "/lib/water_entity_triangles.glsl"
-#include "/lib/water/emitter_layout.glsl"
 layout(local_size_x=256) in;
 // Cover all 196608 opaque face slots, or the larger 96-cell lighting volume.
 #if (ENABLE_COLOURED_LIGHTING == 1 || GI_QUALITY > 0) && COLOURED_VOLUME_SIZE == 96
@@ -17,10 +16,6 @@ const ivec3 workGroups = ivec3(768, 1, 1);
 void main() {
 #if SIMPLE_DIMENSION == 0
     int face = int(gl_GlobalInvocationID.x);
-    if (isEyeInWater == 0 && face < waterEnvironmentPixels) {
-        ivec2 cell = ivec2(face % waterEnvironmentSide, face / waterEnvironmentSide);
-        imageStore(colorimg5, waterEnvironmentAddress(cell, frameCounter & 1, 0), uvec4(floatBitsToUint(65505.0)));
-    }
     if (isEyeInWater != 1 && face < waterPlantCells / 2) {
         imageStore(colorimg5, waterPlantAddress(face), uvec4(0u));
         imageStore(colorimg5, waterPlantAddress(face + waterPlantCells / 2), uvec4(0u));
@@ -32,10 +27,6 @@ void main() {
         int row = imageSize(colorimg5).y - 1;
         imageStore(colorimg5, ivec2(28, row), uvec4(uint(frameCounter) + 1u));
         imageStore(colorimg5, ivec2(29, row), uvec4(0u));
-        imageStore(colorimg5, ivec2(30, row), uvec4(0u));
-        imageStore(colorimg5, ivec2(31, row), uvec4(0u));
-        imageStore(colorimg5, waterEmitterAddress(0), uvec4(0u));
-        imageStore(colorimg5, waterEmitterAddress(1), uvec4(uint(frameCounter) + 1u));
     }
     if (face < 4) imageStore(colorimg5, ivec2(21 + face, imageSize(colorimg5).y - 1), uvec4(0u));
     if (isEyeInWater == 1 && face < waterMacroCount) imageStore(colorimg5, waterTriangleHead(face), uvec4(0u));
@@ -43,9 +34,6 @@ void main() {
     if (face < 3) imageStore(colorimg5, ivec2(18 + face, imageSize(colorimg5).y - 1), uvec4(0u));
     if (face < waterColumnCount) imageStore(colorimg5, waterColumnAddress(face), uvec4(0));
     if (face < waterMacroCount) imageStore(colorimg5, waterMacroAddress(face), uvec4(0u));
-    if (isEyeInWater == 0 && face < waterEmitterBuckets) {
-        imageStore(colorimg5, waterEmitterBucket(face), uvec4(0u));
-    }
     if (face < waterFarSlots) imageStore(colorimg5, waterKeyAddress(face), uvec4(0u));
     if (isEyeInWater == 1 && face < waterGlassSlots) {
         int record = waterTotalFaces + face;

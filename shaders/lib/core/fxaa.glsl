@@ -7,7 +7,11 @@ vec3 displaySample(sampler2D scene, vec2 uv, vec2 pixel) {
 }
 
 float displayLuma(vec3 colour) {
+#if AA_MODE == 1
+    return dot(colour, vec3(0.299, 0.587, 0.114));
+#else
     return dot(colour, vec3(0.2126, 0.7152, 0.0722));
+#endif
 }
 
 vec3 filterDisplayEdges(sampler2D scene, vec2 uv) {
@@ -24,11 +28,12 @@ vec3 filterDisplayEdges(sampler2D scene, vec2 uv) {
     float low = min(middle, min(min(nw, ne), min(sw, se)));
     float high = max(middle, max(max(nw, ne), max(sw, se)));
 #if AA_MODE == 1
-    if (high - low < max(0.0625, high * 0.166)) {
+    // Match BSL v7.0p1's relative threshold, including dark water edges.
+    if (high - low <= high * 0.0625) {
         return centre;
     }
     vec2 direction = vec2(nw + ne - sw - se, nw + sw - ne - se);
-    float regularizer = max((nw + ne + sw + se) * 0.03125, 0.0078125);
+    float regularizer = max((nw + ne + sw + se) * 0.0625, 0.0078125);
     direction /= min(abs(direction.x), abs(direction.y)) + regularizer;
     direction = clamp(direction, vec2(-4.0), vec2(4.0)) * pixel;
     vec3 inner = 0.5 * (displaySample(scene, uv - direction / 6.0, pixel)

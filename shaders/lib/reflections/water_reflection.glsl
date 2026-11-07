@@ -291,18 +291,6 @@ uniform sampler2D depthtex0;
 uniform sampler2D colortex1;
 uniform sampler2D colortex2;
 
-// Colour reconstruction validates each mip-zero texel against the hit plane.
-vec4 filteredWaterReflection(vec2 uv, float distanceToHit, float hitDepth, float roughness) {
-    return vec4(reflectionSourceRadiance(colortex6, depthtex2, uv), 1.0);
-}
-
-// 判断倒影中的点是否在水面以下：水下的方块不应出现在水面倒影里。
-bool waterReflectionSubmerged(vec2 uv, vec3 origin) {
-    vec2 pixelUv = reflectionPixelUv(uv);
-    vec3 scene = screenToView(pixelUv, texture(depthtex2, pixelUv).r);
-    return viewToAbsoluteWorld(scene).y < viewToAbsoluteWorld(origin).y - 0.12;
-}
-
 // 水的 Fresnel。物理上的 Schlick 曲线（F0 = 0.02，五次方）在常见的俯视角下
 // 几乎不反射，水面因此被水色主导。这里参考 Sildur 的做法：略高的 F0 与四次方
 // 曲线，使中等角度也能看到明显的天空和景物倒影；粗糙水面在掠射时略降低峰值。
@@ -340,27 +328,6 @@ vec3 waterEnvironment(vec3 originWorld, vec3 rayWorld, float skyVisibility, bool
 #endif
     return (cloud.rgb + sky * (1.0 - cloud.a)) * skyVisibility;
 }
-
-// A thin cascade in front of a rock face already has native premultiplied
-// colour. Include it when the camera depth places the two surfaces together.
-vec3 waterBankLayer(vec2 uv, vec3 backing, vec3 mirror) {
-    vec4 layer = waterScreenLayer(uv);
-    if (layer.a <= 0.001) return backing;
-    ivec2 size = textureSize(depthtex0, 0);
-    ivec2 pixel = clamp(ivec2(uv * vec2(size)), ivec2(0), size - 1);
-    vec2 centre = (vec2(pixel) + 0.5) / vec2(size);
-    vec3 front = screenToView(centre, texelFetch(depthtex0, pixel, 0).r);
-    vec3 solid = screenToView(centre, texelFetch(depthtex2, pixel, 0).r);
-    vec4 surface = texelFetch(colortex9, pixel, 0);
-    if (surface.a > 0.5 && surface.b <= -front.z + 0.02) return backing;
-    vec3 up = mat3(gbufferModelView) * vec3(0.0, 1.0, 0.0);
-    if (dot(front - mirror, up) < -0.03) return backing;
-    float close = 1.0 - smoothstep(1.0, 2.0, length(solid - front));
-    return mix(backing, applyTransparentLayer(backing, layer), close);
-}
-
-#include "/lib/water/emitter_surface.glsl"
-#include "/lib/water_environment.glsl"
 
 // Reproject only the footprint of an already resolved visible receiver. The
 // full two-view search is shared by these samples. At a crease each subray
@@ -640,7 +607,7 @@ vec3 waterInterfaceNormal(vec3 position, vec3 originWorld, float sky) {
 
 uniform sampler2D colortex15;
 #include "/lib/water_distant.glsl"
-#include "/lib/water_reflection_filter.glsl"
+#include "/lib/reflections/bsl_water_reflection.glsl"
 
 // 折射改变水底的投影位置；吸收仍由采样处的真实水内距离决定。
 vec3 applyWaterReflection(vec3 color, vec2 uv, float normalVariance) {
@@ -666,11 +633,10 @@ vec3 applyWaterReflection(vec3 color, vec2 uv, float normalVariance) {
     // 水下窗口需要清晰的波浪起伏；水上倒影使用更平缓的光学斜率，
     // 避免同一组放大法线把相邻倒影拉成相互交叠的碎片。
     vec3 reflectionNormal = waterMirrorNormal(position, opticalNormal, normal, distantWaterBlend(position));
-    vec3 direction = waterAirDirection(position, reflectionNormal);
-    float weight = waterDielectricFresnel(max(dot(reflectionNormal, -incident), 0.0), 1.0 / WATER_IOR)
+    float weight = bslWaterFresnel(dot(reflectionNormal, -incident))
         * WATER_REFLECTION_STRENGTH;
     if (weight > 0.001) {
-        reflected = filterWaterReflection(ivec2(gl_FragCoord.xy), position);
+        reflected = texelFetch(colortex15, ivec2(gl_FragCoord.xy), 0).rgb;
         reflected *= WATER_REFLECTION_BRIGHTNESS;
     }
     // 倒影直接与透射混合：夜晚、雨天的天空暗而灰，水面也随之变暗、变灰。

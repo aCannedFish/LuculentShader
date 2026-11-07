@@ -108,7 +108,7 @@ layout(binding=12) uniform sampler2D depthtex2;
 layout(r32ui, binding=5) uniform uimage2D colorimg5;
 #endif
 #include "/lib/water_face_cache.glsl"
-#include "/lib/water_environment.glsl"
+#include "/lib/reflections/bsl_water_reflection.glsl"
 #include "/lib/water_interface_ray.glsl"
 #include "/lib/water_sheet.glsl"
 in float vWaterRestHeight;
@@ -161,21 +161,14 @@ vec4 waterStreamLayer(vec3 world, vec3 face, vec3 view, vec3 illumination, vec3 
     vec3 baseView = mat3(gbufferModelView) * face;
     if (dot(baseView, -incident) < 0.0) baseView = -baseView;
     vec3 mirrorNormal = waterBoundImageNormal(baseView, normalView - baseView);
-    vec3 ray = reflect(incident, mirrorNormal);
     vec3 reflected = isEyeInWater == 1 ? scatter : toLinearSpace(skyColor) * daylight;
-    ivec2 hit;
-    if (waterScreenHit(vViewPos, ray, normalView, 10, hit)) {
-        reflected = texelFetch(colortex6, hit, 0).rgb;
-    } else {
-        vec4 local = sampleWaterEnvironment(vViewPos, ray, normalView);
-        if (local.a > 0.0) {
-            reflected = local.rgb;
-        }
-    }
+    vec4 screenReflection = traceBslWaterReflection(colortex6, depthtex2, vViewPos, mirrorNormal);
+    reflected = mix(reflected, screenReflection.rgb, screenReflection.a);
     // Missing screen information changes the radiance source, not Fresnel.
     // A fall must retain its sky/environment reflection when SSR leaves view.
-    float sheen = totalReflection ? 1.0 : waterDielectricFresnel(cosine,
-        isEyeInWater == 1 ? WATER_IOR : 1.0 / WATER_IOR) * WATER_REFLECTION_STRENGTH;
+    float fresnel = isEyeInWater == 1 ? waterDielectricFresnel(cosine, WATER_IOR)
+        : bslWaterFresnel(cosine);
+    float sheen = totalReflection ? 1.0 : fresnel * WATER_REFLECTION_STRENGTH;
     vec3 radiance = (transmitted * (1.0 - absorption) + scatter * absorption)
         * (1.0 - sheen) + reflected * sheen;
     radiance += waterDirectSpecular(normalView, vViewPos, max(WATER_ROUGHNESS, 0.15))

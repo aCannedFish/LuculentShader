@@ -6,9 +6,6 @@
 // their coverage before applying this pixel's Fresnel, fog and weather.
 void main() {
     ivec2 pixel = ivec2(gl_FragCoord.xy);
-#if SIMPLE_DIMENSION == 0
-    if (isEyeInWater == 0 && all(lessThan(pixel,ivec2(waterEnvironmentSide)))) updateWaterEnvironment(pixel);
-#endif
     vec2 uv = gl_FragCoord.xy / vec2(viewWidth, viewHeight);
     vec4 surface = waterSurfaceAtPixel(colortex9, ivec2(gl_FragCoord.xy));
     fullOut1 = vec4(0.0);

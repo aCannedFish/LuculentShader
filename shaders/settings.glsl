@@ -408,9 +408,6 @@ const vec4 colortex9ClearColor = vec4(0.0, 0.0, 0.0, 0.0);
 
 // 粗糙度控制高光宽度、倒影模糊与水下界面过滤，降低清晰镜面贡献。
 #ifndef WATER_ROUGHNESS
-// Spatial radiance denoising; receiver depth protects nearby detail and water edges.
-#define WATER_FILTER_STRENGTH 0.65 // [0.0 0.35 0.65 1.0]
-
 #define WATER_ROUGHNESS 0.25 // [0.04 0.08 0.12 0.18 0.25 0.35]
 #endif
 #ifndef WATER_REFLECTION_STRENGTH
