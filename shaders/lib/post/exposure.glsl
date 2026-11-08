@@ -23,11 +23,22 @@ float postMeterExposure() {
     night = 1.0 - smoothstep(-0.16, 0.12, sun.y);
     rain = clamp(rainStrength, 0.0, 1.0);
 #endif
-    // 保留雨夜的环境亮度差异，避免把暗场统一补偿到白天的中灰。
-    float key = mix(0.18, 0.035, night) * mix(1.0, 0.70, rain);
+    // 中灰按当前曲线的输入标定；ACES 拟合自带预曝光，输入 0.18 会偏亮。
+    // 以下输入分别映射到约 0.18 的显示线性亮度，EXPOSURE 仍是用户补偿。
+#if TONEMAP_MODE == 1
+    const float daylightKey = 0.13017;
+#elif TONEMAP_MODE == 2
+    const float daylightKey = 0.21951;
+#else
+    const float daylightKey = 0.18;
+#endif
+    // 在 EV 空间只补偿四分之三，保留受光与遮阴环境的亮度差异。
+    // 雨夜继续采用较低目标及独立上限，不把暗场抬成白天。
+    float key = mix(daylightKey, 0.035, night) * mix(1.0, 0.70, rain);
+    float compensation = exp2(log2(key / max(average, 0.0001)) * 0.75);
     float maximum = mix(AUTO_EXPOSURE_MAX, min(AUTO_EXPOSURE_MAX, AUTO_EXPOSURE_NIGHT_MAX), night);
     maximum = mix(maximum, min(maximum, AUTO_EXPOSURE_RAIN_MAX), rain);
-    return clamp(key / max(average, 0.0001), AUTO_EXPOSURE_MIN,
+    return clamp(compensation, AUTO_EXPOSURE_MIN,
         max(maximum, AUTO_EXPOSURE_MIN));
 }
 

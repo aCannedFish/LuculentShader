@@ -86,8 +86,6 @@ vec3 applyTonemap(vec3 color) {
 #else
     float mappedLuminance = tonemapACES(luminance);
 #endif
-    // 小幅抬升中间调；黑点和白点不动，亮部继续由原曲线压缩。
-    mappedLuminance += 0.08 * mappedLuminance * (1.0 - mappedLuminance);
     color *= mappedLuminance / max(luminance, EPSILON);
     color = postColorGrade(color);
     // 色域边界处向同亮度中性颜色收敛，软化高光，避免单通道硬裁切。
