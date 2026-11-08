@@ -23,11 +23,13 @@ jobs:
             gi: 0
             loader: optifine
             taa: 0
+            ao: 0
           - preset: LOW
             colored: 0
             gi: 0
             loader: iris
             taa: 0
+            ao: 0
           - preset: ULTRA
             colored: 1
             gi: 1
@@ -55,6 +57,7 @@ jobs:
           LOADER: ${{ matrix.loader }}
           POST_LENS: ${{ matrix.post_lens || 0 }}
           TAA: ${{ matrix.taa }}
+          AO: ${{ matrix.ao }}
         run: |
           python3 - <<'PY'
           import os
@@ -70,6 +73,8 @@ jobs:
           options = dict(item.split('=', 1) for item in profile.split())
           options['ENABLE_COLOURED_LIGHTING'] = os.environ['COLORED']
           options['ENABLE_TAA'] = os.environ['TAA']
+          if os.environ['AO']:
+              options['SSAO_QUALITY'] = os.environ['AO']
           if os.environ['GI'] == '0':
               options['GI_QUALITY'] = '0'
           if os.environ['POST_LENS'] == '1':

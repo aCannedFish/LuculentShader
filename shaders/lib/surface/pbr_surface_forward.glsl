@@ -195,6 +195,9 @@ vec3 computePbrLighting(LabPbrMaterial pbr, vec3 normal, vec2 lightmap, vec3 sha
             * materialEnvironmentWeight(m, dot(normal, view)) * strength;
         direct = pbrDirectGloss(m, normal, position, uv, lightmap, shadow) * strength;
     }
+#ifdef LUCULENT_CAPTURE_INDIRECT
+    surfaceIndirectRadiance += environment;
+#endif
     vec3 emission = pbr.albedo * pbr.emission * ORE_GLOW_STRENGTH * 4.0;
     reflectionSource = diffuse + environment + emission;
     return reflectionSource + direct;

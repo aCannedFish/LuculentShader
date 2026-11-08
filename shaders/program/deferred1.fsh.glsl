@@ -40,6 +40,7 @@ const bool colortex0MipmapEnabled = false;
 
 uniform sampler2D colortex15;
 uniform sampler2D depthtex2;
+#include "/lib/lighting/ambient_occlusion.glsl"
 
 void main() {
     vec2 uv = gl_FragCoord.xy / vec2(viewWidth, viewHeight);
@@ -48,6 +49,18 @@ void main() {
     vec4 worldSource = texelFetch(colortex15, ivec2(gl_FragCoord.xy), 0);
     float preHandDepth = texelFetch(depthtex2, ivec2(gl_FragCoord.xy), 0).r;
     bool viewmodel = depth != preHandDepth;
+    float ambientVisibility = 1.0;
+#if SSAO_QUALITY > 0
+    vec4 indirect = texelFetch(colortex4, ivec2(gl_FragCoord.xy), 0);
+    if (preHandDepth < 0.999999 && indirect.a > 0.5
+        && any(greaterThan(indirect.rgb, vec3(0.00001)))) {
+        ambientVisibility = screenAmbientVisibility(uv, preHandDepth);
+        worldSource.rgb = applyAmbientOcclusion(worldSource.rgb, indirect.rgb, ambientVisibility);
+        if (!viewmodel) {
+            opaque.rgb = applyAmbientOcclusion(opaque.rgb, indirect.rgb, ambientVisibility);
+        }
+    }
+#endif
     float sourceTag = viewmodel ? worldSource.a : opaque.a;
     // Source alpha packs coverage (bit 0) and cutout class (bit 1). It is not
     // a blend opacity: a leaf hole containing a wall keeps the wall's coverage.
@@ -109,6 +122,7 @@ void main() {
                 vec3 oldEnvironment = materialAmbientEnvironment(worldNormal, lightmap)
                     * materialEnvironmentWeight(original, dot(normal, view)) * MATERIAL_REFLECTION_STRENGTH;
                 oldEnvironment *= float(ENABLE_MATERIAL_REFLECTIONS);
+                oldEnvironment *= ambientVisibility;
                 SurfaceMaterial coating;
                 coating.f0 = vec3(0.025);
                 coating.roughness = 0.065;

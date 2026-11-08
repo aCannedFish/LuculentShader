@@ -168,7 +168,8 @@ vec3 surfaceAmbientAt(vec2 lmCoord, float occlusion, vec3 normalView, vec3 viewP
     vec3 ambient = surfaceAmbient(lmCoord, occlusion);
     float localOcclusion = mix(clamp(occlusion, 0.0, 1.0), 1.0, 0.80);
     vec3 nativeBlock = blockLightRadiance(lmCoord);
-    ambient += (companionBlockLight(viewPosition, normalView, lmCoord, nativeBlock) - nativeBlock)
+    vec3 localBlock = companionBlockLight(viewPosition, normalView, lmCoord, nativeBlock);
+    ambient += (localBlock - nativeBlock)
              * localOcclusion;
     ambient += companionIndirect(viewPosition, normalView) * mix(occlusion, 1.0, 0.5);
     // 为无天光的矿洞保留可导航亮度；已有照明达到目标时不继续增亮。
@@ -184,6 +185,9 @@ vec3 surfaceAmbientAt(vec2 lmCoord, float occlusion, vec3 normalView, vec3 viewP
     float contact = mix(0.55, 1.0, clamp(occlusion, 0.0, 1.0));
     float target = MIN_AMBIENT_LIGHT * shape * contact;
     ambient += vec3(max(target - luma(ambient), 0.0));
+#ifdef LUCULENT_CAPTURE_INDIRECT
+    surfaceIndirectRadiance = max(ambient - localBlock * localOcclusion, vec3(0.0));
+#endif
     return ambient;
 }
 
@@ -191,7 +195,11 @@ vec3 surfaceAmbientAt(vec2 lmCoord, float occlusion, vec3 normalView, vec3 viewP
 vec3 computeSurfaceLighting(vec3 albedo, vec3 normalView, vec2 lmCoord,
                            vec3 shadowFactor, float occlusion, vec3 viewPosition) {
 #if SIMPLE_DIMENSION != 0
-    return albedo * surfaceAmbientAt(lmCoord, occlusion, normalView, viewPosition);
+    vec3 dimensionFill = surfaceAmbientAt(lmCoord, occlusion, normalView, viewPosition);
+#ifdef LUCULENT_CAPTURE_INDIRECT
+    surfaceIndirectRadiance *= albedo;
+#endif
+    return albedo * dimensionFill;
 #endif
     vec3 sunDir = safeNormalize(sunPosition, vec3(0.0, 1.0, 0.0));
     vec3 moonDir = safeNormalize(moonPosition, vec3(0.0, 1.0, 0.0));
@@ -207,8 +215,11 @@ vec3 computeSurfaceLighting(vec3 albedo, vec3 normalView, vec2 lmCoord,
         cloudVisibility = cloudProjectedShadow(world, normalize(mat3(gbufferModelViewInverse) * getLightDirView()));
     }
     direct *= cloudVisibility;
-    vec3 illumination = surfaceAmbientAt(lmCoord, occlusion, normalView, viewPosition)
-                      + direct * shadowFactor * directVisibility;
+    vec3 ambient = surfaceAmbientAt(lmCoord, occlusion, normalView, viewPosition);
+#ifdef LUCULENT_CAPTURE_INDIRECT
+    surfaceIndirectRadiance *= albedo;
+#endif
+    vec3 illumination = ambient + direct * shadowFactor * directVisibility;
     return albedo * illumination;
 }
 

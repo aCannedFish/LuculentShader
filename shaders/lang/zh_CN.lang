@@ -309,3 +309,11 @@ option.WHITE_BALANCE=白平衡
 option.WHITE_BALANCE.comment=负值偏冷、正值偏暖；保持场景亮度，不替代曝光补偿。
 option.BLOOM_SCATTER=泛光扩散
 option.BLOOM_SCATTER.comment=在窄光晕和四级低频光晕之间分配权重，0 保留窄光晕。
+
+option.SSAO_QUALITY=环境光遮蔽
+option.SSAO_QUALITY.comment=为近处接触面与凹角增加屏幕空间遮蔽，只削弱间接光。水面和第一人称手部不作为遮挡深度。
+value.SSAO_QUALITY.0=关闭
+value.SSAO_QUALITY.1=快速
+value.SSAO_QUALITY.2=高质量
+option.SSAO_STRENGTH=AO强度
+option.SSAO_STRENGTH.comment=调整接触处的间接光遮蔽程度，直射照明与材质自发光独立保留。

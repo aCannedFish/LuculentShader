@@ -45,6 +45,10 @@ vec3 getFogColor() {
  * ------------------------------------------------------------------------ */
 vec3 applyFog(vec3 color, float distanceToCamera) {
     float fogFactor = getFogFactor(distanceToCamera);
+#ifdef LUCULENT_CAPTURE_INDIRECT
+    // Indirect radiance follows the same transmittance; fog itself is not occluded.
+    surfaceIndirectRadiance *= 1.0 - fogFactor;
+#endif
 
     // mix(a, b, t) = a * (1-t) + b * t
     // fogFactor 接近 1 时颜色几乎完全变成雾色。

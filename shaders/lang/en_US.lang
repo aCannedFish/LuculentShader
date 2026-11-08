@@ -314,3 +314,11 @@ option.WHITE_BALANCE=White balance
 option.WHITE_BALANCE.comment=Negative values cool the image; positive values warm it. Scene luminance is preserved.
 option.BLOOM_SCATTER=Bloom scatter
 option.BLOOM_SCATTER.comment=Distributes weight between a narrow glow and four low-frequency levels. Zero keeps the narrow glow.
+
+option.SSAO_QUALITY=Ambient Occlusion
+option.SSAO_QUALITY.comment=Screen-space ambient obscurance for nearby contacts and corners. Only indirect lighting is attenuated; water and the first-person layer are excluded from occluder depth.
+value.SSAO_QUALITY.0=Off
+value.SSAO_QUALITY.1=Fast
+value.SSAO_QUALITY.2=High
+option.SSAO_STRENGTH=AO Strength
+option.SSAO_STRENGTH.comment=Controls indirect-light shading at contacts. Direct illumination and material emission remain independent.

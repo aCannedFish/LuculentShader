@@ -120,7 +120,7 @@ const int colortex2Format = RGBA16F;
 // colortex3：前期天空/云查找表，后期泛光亮部与最终垂直过滤结果。
 const int colortex3Format = RGBA16F;
 
-// colortex4：前期体积场，后期泛光水平过滤。两个附件在不同通道间读写，
+// colortex4：不透明间接光，随后复用于体积场与泛光水平过滤。两个附件在不同通道间读写，
 // 避免同一次绘制既读取又写入同一张纹理。
 const int colortex4Format = RGBA16F;
 
@@ -146,6 +146,7 @@ const bool colortex1Clear = true;
 const bool colortex2Clear = true;
 const bool colortex3Clear = true;
 const bool colortex4Clear = true;
+const vec4 colortex4ClearColor = vec4(0.0, 0.0, 0.0, 0.0);
 const bool colortex9Clear = true;
 const bool colortex6Clear = true;
 const bool colortex7Clear = true;
@@ -159,6 +160,10 @@ const vec4 colortex9ClearColor = vec4(0.0, 0.0, 0.0, 0.0);
 /* ============================================================================
  * 三、阴影设置
  * ==========================================================================*/
+
+// 屏幕空间环境光遮蔽：0关闭，1八点近景，2十二点并延长覆盖距离。
+#define SSAO_QUALITY 1 // [0 1 2]
+#define SSAO_STRENGTH 1.0 // [0.0 0.5 0.75 1.0 1.25 1.5]
 
 // 总开关。0 = 关闭阴影（同时省掉整个 shadow 渲染通道），1 = 开启。
 #ifndef ENABLE_SHADOWS

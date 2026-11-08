@@ -106,6 +106,10 @@ void writeGBuffers(vec3 color, vec3 normalView, vec2 lightmapCoord,
 #ifndef FIRST_PERSON_HAND
     fullOut4 = vec4(color, 1.0);
 #endif
+#ifdef LUCULENT_CAPTURE_INDIRECT
+    // Emission and direct lighting are absent from this independently shaded layer.
+    indirectOut = vec4(max(surfaceIndirectRadiance, vec3(0.0)), material == MAT_BILLBOARD ? 0.0 : 1.0);
+#endif
 }
 
 // 彩色日光传递在缓冲中只保留平均可见度。

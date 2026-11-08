@@ -1,3 +1,4 @@
+#include "/lib/surface/opaque_targets.glsl"
 #define SIMPLE_VARYING in
 layout(location=0) out vec4 fullOut0;
 layout(location=1) out vec4 fullOut1;
@@ -50,7 +51,7 @@ layout(location=4) out vec4 fullOut4;
 */
 #include "/lib/surface/fragment_output_forward.glsl"
 
-/* RENDERTARGETS: 0,1,2,14,15 */
+
 
 /*
 ================================================================================
