@@ -1,6 +1,10 @@
 // Water optical stage 10: transmitted radiance.
 /* RENDERTARGETS: 7 */
-#include "/lib/water/pipeline.glsl"
+#include "/lib/water/native_optics.glsl"
+#include "/lib/labpbr_decode.glsl"
+#include "/lib/pbr_height.glsl"
+#include "/lib/transparent_pbr.glsl"
+#include "/lib/water_glass.glsl"
 
 // Save one shaded receiver per water pixel. The composition pass integrates
 // their coverage before applying this pixel's Fresnel, fog and weather.

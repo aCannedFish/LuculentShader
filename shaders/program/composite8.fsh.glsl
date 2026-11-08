@@ -1,6 +1,7 @@
 // Resolve the underwater exit before the independent air-side water programs.
 /* RENDERTARGETS: 7 */
-#include "/lib/water/pipeline.glsl"
+#include "/lib/water/native_optics.glsl"
+#include "/lib/water/underwater.glsl"
 
 void main() {
     ivec2 pixel = ivec2(gl_FragCoord.xy);

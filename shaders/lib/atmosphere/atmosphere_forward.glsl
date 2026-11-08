@@ -136,7 +136,7 @@ float atmosphereMiePhase(float cosine) {
 vec3 integrateAtmosphere(vec3 direction) {
 #if SIMPLE_DIMENSION != 0
     return dimensionBackground(direction);
-#endif
+#else
     vec3 ray = direction;
     if (ray.y < 0.003) {
         // 下半球使用地平线延续；先归一化水平方向，不能把接近零的
@@ -187,6 +187,7 @@ vec3 integrateAtmosphere(vec3 direction) {
     vec3 clearSky = radiance * mix(0.75, 1.0, smoothstep(-0.5, 0.0, direction.y))
                   + twilightSkyRadiance(direction) + auroraRadiance(direction);
     return weatherSkyRadiance(clearSky);
+#endif
 }
 
 #endif

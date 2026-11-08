@@ -44,11 +44,6 @@
  */
 #include "/lib/reflections/reflection_source.glsl"
 
-/* A reflection source is surface radiance, without camera fog. Apply only the
- * reflected air segment here; the receiving surface applies its own segment.
- */
-#include "/lib/reflections/reflection_medium.glsl"
-
 /* 水面局部光照与 GGX 高光；只供片元阶段使用。 */
 #include "/lib/water/water_lighting_water.glsl"
 
@@ -298,33 +293,7 @@ float waterFresnel(float cosine, float roughness) {
 }
 
 // 天空回退保留同一套天空/云输入；封闭水域的天空辐射为零。
-vec3 waterEnvironment(vec3 originWorld, vec3 rayWorld, float skyVisibility, bool celestial) {
-#if SIMPLE_DIMENSION == 1
-    return mix(dimensionAmbient(rayWorld) * AMBIENT_STRENGTH,
-               skyAtmosphereRadiance(rayWorld) * 1.8, END_ATMOSPHERE * 0.65);
-#elif SIMPLE_DIMENSION == -1
-    return dimensionAmbient(rayWorld) * AMBIENT_STRENGTH;
-#endif
-    if (skyVisibility <= 0.001) {
-        return vec3(0.0);
-    }
-    vec3 sky = skyAtmosphereRadiance(rayWorld) + skyStars(rayWorld);
-    if (celestial) {
-        sky += skyCelestialRadiance(rayWorld);
-    }
-#if WATER_REFLECTION_CLOUDS == 1
-    // The sky strip already integrates clouds from the eye. Only integrate
-    // them again when the reflected ray origin produces discernible parallax.
-    float cloudRange = max(abs(CLOUD_HEIGHT - originWorld.y), 1.0) / max(rayWorld.y, 0.001);
-    float parallax = length(originWorld - cameraPosition) / cloudRange;
-    float detail = smoothstep(0.012, 0.035, parallax);
-    vec4 cloud = cloudEnvironment(rayWorld);
-    if (detail > 0.0) cloud = mix(cloud, traceVolumetricCloudsFrom(originWorld, rayWorld, CLOUD_DISTANCE, true), detail);
-#else
-    vec4 cloud = cloudEnvironment(rayWorld);
-#endif
-    return (cloud.rgb + sky * (1.0 - cloud.a)) * skyVisibility;
-}
+#include "/lib/water/reflected_environment.glsl"
 
 // Reproject only the footprint of an already resolved visible receiver. The
 // full two-view search is shared by these samples. At a crease each subray

@@ -87,10 +87,11 @@ vec3 waterLightSpecular(vec3 normal, vec3 view, vec3 light, vec3 radiance, float
 vec3 waterDirectSpecular(vec3 normalView, vec3 viewPosition, float roughness) {
 #if SIMPLE_DIMENSION != 0
     return vec3(0.0);
-#endif
+#else
     vec3 view = safeNormalize(-viewPosition, normalView);
     return waterLightSpecular(normalView, view, normalize(sunPosition), getSunLightColor(), roughness)
          + waterLightSpecular(normalView, view, normalize(moonPosition), getMoonLightColor(), roughness);
+#endif
 }
 
 #endif

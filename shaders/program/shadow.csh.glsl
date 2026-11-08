@@ -1,4 +1,4 @@
-#include "/lib/conventional_lpv.glsl"
+#include "/lib/lighting/local_volume.glsl"
 #include "/lib/water_face_cache.glsl"
 #include "/lib/water_plant_surface.glsl"
 #include "/lib/water_environment_layout.glsl"

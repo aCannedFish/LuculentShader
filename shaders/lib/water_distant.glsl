@@ -40,13 +40,11 @@ vec3 waterAirDirection(vec3 position, vec3 opticalNormal) {
     return normalize(ray + up * max(elevation - dot(up, ray), 0.0));
 }
 
-#include "/lib/reflections/bsl_water_surface.glsl"
+#include "/lib/water/mirror_normal.glsl"
 
 // Air-side appearance has its own BSL wave field; the displaced Snell
 // interface and all distant transmission helpers below retain their inputs.
-vec3 waterMirrorNormal(vec3 position) {
-    return bslWaterReflectionNormal(position, viewToAbsoluteWorld(position), vec3(0.0, 1.0, 0.0));
-}
+
 
 // One Snell ray meets a local bed-height estimate, then samples a real opaque
 // texel. The straight camera sample supplies a fallback at disocclusions.

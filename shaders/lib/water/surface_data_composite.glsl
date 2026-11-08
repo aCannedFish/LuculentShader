@@ -30,21 +30,14 @@ vec4 readWaterSurface(sampler2D geometry, vec2 uv) {
 
 // Full-resolution passes address an actual fragment centre and need a single
 // parameter texel. Reduced-resolution probes retain filtered sampling.
-vec4 waterSurfaceAtPixel(sampler2D geometry, ivec2 pixel) {
-    vec4 surface = texelFetch(geometry, pixel, 0);
-    if (surface.a < 0.5) return vec4(0.0);
-    return vec4(surface.rg, imageLoad(colorimg1, pixel).r, surface.b);
-}
+#include "/lib/water/surface_access.glsl"
 
 vec3 readWaterScattering(sampler2D geometry, sampler2D scattering, vec2 uv) {
     return texture(scattering, uv).rgb;
 }
 
 // 从透明水面附件的线性深度恢复位置，供水面合成与水深估计共用。
-vec3 waterSurfacePosition(vec2 uv, float linearDepth) {
-    vec4 ray = gbufferProjectionInverse * vec4(uv * 2.0 - 1.0, 0.0, 1.0);
-    return ray.xyz * (linearDepth / max(-ray.z, EPSILON));
-}
+
 
 // 空气到水的折射率约为 1.333，法向入射的反射率约为 2%。
 float waterFresnel(float cosine) {

@@ -65,15 +65,17 @@ float getSunHeight() {
 float getDayFactor() {
 #if SIMPLE_DIMENSION != 0
     return 1.0;
-#endif
+#else
     return smoothstep(-0.12, 0.16, getSunHeight());
+#endif
 }
 
 float getNightFactor() {
 #if SIMPLE_DIMENSION != 0
     return 0.0;
-#endif
+#else
     return 1.0 - smoothstep(-0.16, 0.12, getSunHeight());
+#endif
 }
 
 /* ---------------------------------------------------------------------------
@@ -90,22 +92,24 @@ vec3 getLightDirView() {
 vec3 getSunLightColor() {
 #if SIMPLE_DIMENSION != 0
     return vec3(0.0);
-#endif
+#else
     // 直射光须与实际阴影光源的半球一致；暮光环境光仍保留较宽的昼夜过渡。
     float elevation = getSunHeight();
     return atmosphereDirectTransmittance(elevation)
          * smoothstep(0.0, 0.04, elevation) * SUNLIGHT_STRENGTH
          * mix(1.0, 0.20, weatherRainAmount());
+#endif
 }
 
 // 月光独立淡出，避免把两侧光源方向混成零向量。
 vec3 getMoonLightColor() {
 #if SIMPLE_DIMENSION != 0
     return vec3(0.0);
-#endif
+#else
     return vec3(0.80, 0.86, 1.00) * MOONLIGHT_STRENGTH
          * smoothstep(0.0, 0.04, skyMoonDirection().y) * getNightFactor()
          * (0.08 + 0.92 * lunarIlluminatedFraction()) * mix(1.0, 0.35, weatherRainAmount());
+#endif
 }
 
 // 环境光颜色：天空的散射光。

@@ -1,9 +1,7 @@
 // Water shafts filter.
 #ifndef LIB_WATER_SHAFTS_FILTER_GLSL
 #define LIB_WATER_SHAFTS_FILTER_GLSL
-float estimateUnderwaterDepth() {
-    return texture(colortex4, vec2(0.5) / vec2(viewWidth, viewHeight)).a;
-}
+#include "/lib/water/underwater_state.glsl"
 
 // alpha 保存积分终点，拒绝跨越近处遮挡物的散射，首个元数据纹素不参与重建。
 vec3 sampleWaterShafts(vec2 uv, float pathLength) {

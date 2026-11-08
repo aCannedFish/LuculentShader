@@ -1,6 +1,20 @@
 // Water optical stage 9: reflected radiance.
 /* RENDERTARGETS: 15 */
-#include "/lib/water/pipeline.glsl"
+#define SIMPLE_VARYING in
+layout(location=0) out vec4 fullOut0;
+const bool colortex6MipmapEnabled = false;
+// Reflection needs sky, surface access and air transport, without scene tracing.
+#include "/lib/atmosphere/clouds_water.glsl"
+#include "/lib/core/space_forward.glsl"
+#include "/lib/lighting/shadow_filter_water.glsl"
+#include "/lib/water/surface_access.glsl"
+#include "/lib/water/mirror_normal.glsl"
+#include "/lib/water/reflected_environment.glsl"
+#include "/lib/atmosphere/reflected_air.glsl"
+uniform sampler2D colortex6;
+uniform sampler2D colortex9;
+uniform sampler2D colortex15;
+uniform sampler2D depthtex2;
 #include "/lib/reflections/bsl_water_reflection.glsl"
 
 // Resolve reflection separately from refraction to keep both programs within

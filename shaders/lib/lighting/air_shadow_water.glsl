@@ -14,7 +14,7 @@ vec2 airShadowOrigin() {
 float buildAirCloudShadow(vec2 coordinate, vec3 sun) {
 #if SIMPLE_DIMENSION != 0
     return 1.0;
-#endif
+#else
     if (sun.y <= 0.02 || CLOUD_OPACITY <= 0.0 || CLOUD_SHADOW_STRENGTH <= 0.0) {
         return 1.0;
     }
@@ -34,6 +34,7 @@ float buildAirCloudShadow(vec2 coordinate, vec3 sun) {
     }
     float transmission = exp(-opticalDepth * 0.04 * CLOUD_OPACITY);
     return mix(1.0, transmission, CLOUD_SHADOW_STRENGTH);
+#endif
 }
 
 // 缓存存的是标量透射率，可由附件的线性过滤直接插值；深度比较仍在各自

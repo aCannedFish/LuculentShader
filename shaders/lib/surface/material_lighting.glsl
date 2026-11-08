@@ -52,7 +52,7 @@ vec3 materialDirectSpecular(SurfaceMaterial m, vec3 normal, vec3 viewPosition,
                            vec2 lmCoord, vec3 shadow) {
 #if SIMPLE_DIMENSION != 0
     return materialPointSpecular(m, normal, viewPosition);
-#endif
+#else
     vec3 view = safeNormalize(-viewPosition, normal);
     vec3 solar = materialLightSpecular(m, normal, view, normalize(sunPosition), getSunLightColor())
                + materialLightSpecular(m, normal, view, normalize(moonPosition), getMoonLightColor());
@@ -63,6 +63,7 @@ vec3 materialDirectSpecular(SurfaceMaterial m, vec3 normal, vec3 viewPosition,
         solar *= shadow * sky * cloud;
     }
     return solar + materialPointSpecular(m, normal, viewPosition);
+#endif
 }
 
 #endif

@@ -96,7 +96,7 @@ float cloudDensity(vec3 world, bool erosion) {
 float cloudProjectedShadowDirect(vec3 world, vec3 lightDirection) {
 #if SIMPLE_DIMENSION != 0
     return 1.0;
-#endif
+#else
     if (CLOUD_SHADOW_STRENGTH <= 0.0 || lightDirection.y <= 0.04) {
         return 1.0;
     }
@@ -113,6 +113,7 @@ float cloudProjectedShadowDirect(vec3 world, vec3 lightDirection) {
     }
     float transmission = exp(-density * stepLength * 0.04 * CLOUD_OPACITY);
     return mix(1.0, transmission, CLOUD_SHADOW_STRENGTH);
+#endif
 }
 
 float cloudProjectedShadow(vec3 world, vec3 lightDirection) {

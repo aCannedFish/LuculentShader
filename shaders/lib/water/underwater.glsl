@@ -6,7 +6,9 @@
  * Buffers keep full attachment sizes; generation and reconstruction must agree
  * on the active lower-left region, including odd internal render dimensions.
  */
+#ifndef WATER_TRANSMISSION_PASS
 #include "/lib/atmosphere/volume_resolution.glsl"
+#endif
 
 /* 水面细节法线与像素足迹过滤。几何位移保留 water.glsl 中的长波，细节只改变法线。
  *
@@ -25,13 +27,18 @@
 #define LUCULENT_WORLD_DEPTH_UNIFORM
 uniform sampler2D depthtex2;
 #endif
+#ifndef WATER_TRANSMISSION_PASS
 SIMPLE_VARYING vec3 vUnderwaterTint;
 SIMPLE_VARYING vec3 vUnderwaterScatter;
+#endif
 #define underwaterOpaqueSource colortex6
 
 /* Reconstruct the reduced underwater shaft field using optical path depth.
  * The first texel is frame metadata and never contributes shaft radiance. */
+#include "/lib/water/underwater_state.glsl"
+#ifndef WATER_TRANSMISSION_PASS
 #include "/lib/water/water_shafts_filter.glsl"
+#endif
 
 // 水下出射按深度区分几何与天空；天空方向从统一天空表恢复，实际几何继续遮挡它。
 vec3 underwaterBackgroundColor(vec2 uv) {
@@ -51,6 +58,7 @@ vec3 underwaterBackgroundColor(vec2 uv) {
 #include "/lib/water_exit.glsl"
 #endif
 
+#ifndef WATER_TRANSMISSION_PASS
 // 全反射只查询水下场景。离屏或无命中时使用受当地照明控制的水色。
 vec3 underwaterInterfaceReflection(vec3 interfaceView, vec3 direction, float waterHeight) {
     vec3 fallback = vUnderwaterScatter
@@ -71,6 +79,7 @@ vec3 underwaterInterfaceReflection(vec3 interfaceView, vec3 direction, float wat
     return mix(fallback, applyUnderwaterVolume(radiance, hit.distance,
         vUnderwaterTint, vUnderwaterScatter), hit.coverage);
 }
+#endif
 
 vec4 applyUnderwaterOptics(vec2 uv) {
     float eyeDepth = estimateUnderwaterDepth();
