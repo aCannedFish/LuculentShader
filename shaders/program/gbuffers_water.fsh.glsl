@@ -109,6 +109,7 @@ layout(binding=12) uniform sampler2D depthtex2;
 #include "/lib/reflections/bsl_water_surface.glsl"
 #include "/lib/water_interface_ray.glsl"
 #include "/lib/water_sheet.glsl"
+#include "/lib/atmosphere/reflected_air.glsl"
 in float vWaterRestHeight;
 
 // Thin streams use their actual raster plane, including vertical walls and
@@ -163,7 +164,12 @@ vec4 waterStreamLayer(vec3 world, vec3 face, vec3 view, vec3 illumination, vec3 
         mirrorNormal = bslWaterReflectionNormal(vViewPos, world, mat3(gbufferModelViewInverse) * baseView);
     }
     vec3 reflected = isEyeInWater == 1 ? scatter : toLinearSpace(skyColor) * daylight;
-    vec4 screenReflection = traceBslWaterReflection(colortex6, depthtex2, vViewPos, mirrorNormal);
+    vec3 receiver;
+    vec4 screenReflection = traceBslWaterReflection(colortex6, depthtex2, vViewPos, mirrorNormal, receiver);
+    if (screenReflection.a > 0.0 && isEyeInWater == 0) {
+        vec3 segment = receiver - vViewPos;
+        screenReflection.rgb = reflectionAirMedium(screenReflection.rgb, length(segment), segment, vViewPos);
+    }
     reflected = mix(reflected, screenReflection.rgb, screenReflection.a);
     // Missing screen information changes the radiance source, not Fresnel.
     // A fall must retain its sky/environment reflection when SSR leaves view.

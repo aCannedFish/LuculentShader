@@ -5,7 +5,9 @@
 #ifndef LUCULENT_BSL_WATER_REFLECTION
 #define LUCULENT_BSL_WATER_REFLECTION
 
-vec4 traceBslWaterReflection(sampler2D scene, sampler2D depths, vec3 origin, vec3 normal) {
+vec4 traceBslWaterReflection(sampler2D scene, sampler2D depths, vec3 origin, vec3 normal,
+                           out vec3 receiverPosition) {
+    receiverPosition = origin;
     vec3 reflectedDirection = normalize(reflect(normalize(origin), normalize(normal)));
     vec3 stride = reflectedDirection * 1.2;
     vec3 offset = stride;
@@ -42,6 +44,7 @@ vec4 traceBslWaterReflection(sampler2D scene, sampler2D depths, vec3 origin, vec
                 if (extended && (colour.a < 1.0625 || colour.a >= 1.4375)) return vec4(0.0);
                 float edge = (1.0 / 0.52) * max(abs(projected.x - 0.5), abs(projected.y - 0.5));
                 float coverage = clamp(1.0 - pow(edge, 120.0), 0.0, 1.0);
+                receiverPosition = receiver;
                 // C6 alpha marks world geometry; zero denotes the sky.
                 return vec4(colour.rgb, colour.a > 0.5 ? coverage : 0.0);
             }
@@ -52,6 +55,12 @@ vec4 traceBslWaterReflection(sampler2D scene, sampler2D depths, vec3 origin, vec
         offset += stride;
     }
     return vec4(0.0);
+}
+
+// Callers that do not need the reflected air segment retain the original API.
+vec4 traceBslWaterReflection(sampler2D scene, sampler2D depths, vec3 origin, vec3 normal) {
+    vec3 receiver;
+    return traceBslWaterReflection(scene, depths, origin, normal, receiver);
 }
 
 // Match BSL's skylight modulation before blending the SSR confidence.

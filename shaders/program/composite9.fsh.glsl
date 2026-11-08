@@ -18,7 +18,14 @@ void main() {
     vec3 position = waterSurfacePosition(uv, surface.a);
     vec3 mirrorNormal = waterMirrorNormal(position);
     vec3 direction = reflect(normalize(position), mirrorNormal);
-    vec4 reflected = traceBslWaterReflection(colortex6, depthtex2, position, mirrorNormal);
+    vec3 receiver;
+    vec4 reflected = traceBslWaterReflection(colortex6, depthtex2, position, mirrorNormal, receiver);
+    if (reflected.a > 0.0) {
+        // C6 is intrinsic surface radiance. Transport it through the reflected
+        // air segment before Fresnel composition; C11 handles eye-to-water air.
+        vec3 segment = receiver - position;
+        reflected.rgb = reflectionAirMedium(reflected.rgb, length(segment), segment, position);
+    }
     vec3 sky = waterEnvironment(viewToAbsoluteWorld(position),
         mat3(gbufferModelViewInverse) * direction, bslWaterSkyWeight(surface.b), false);
     // The BSL result is already blended with the sky. Do not run the former

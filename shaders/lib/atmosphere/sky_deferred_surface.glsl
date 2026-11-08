@@ -10,7 +10,7 @@
  */
 #include "/lib/atmosphere/atmosphere_deferred_surface.glsl"
 
-uniform sampler2D colortex3;
+#include "/lib/atmosphere/sky_field.glsl"
 /* Shared sampler for the packed periodic cloud volume and lunar albedo. */
 #include "/lib/atmosphere/sky_noise.glsl"
 
