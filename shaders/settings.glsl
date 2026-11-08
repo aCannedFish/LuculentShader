@@ -549,12 +549,12 @@ const vec4 colortex9ClearColor = vec4(0.0, 0.0, 0.0, 0.0);
 
 // 饱和度。1.0 = 不变，<1 变灰，>1 变艳。
 #ifndef SATURATION
-#define SATURATION 0.9 // [0.8 0.9 1.0 1.05 1.1 1.25]
+#define SATURATION 1.0 // [0.8 0.9 1.0 1.05 1.1 1.25]
 #endif
 
 // 对比度。以中灰 0.5 为中心拉伸。1.0 = 不变。
 #ifndef CONTRAST
-#define CONTRAST 1.0 // [0.9 0.95 1.0 1.05 1.1]
+#define CONTRAST 1.05 // [0.9 0.95 1.0 1.05 1.1]
 #endif
 
 // 暗角强度。0 = 关闭，0.3 = 轻微。屏幕四角压暗。
@@ -603,7 +603,7 @@ const vec4 colortex9ClearColor = vec4(0.0, 0.0, 0.0, 0.0);
 #define ENABLE_CHROMATIC_ABERRATION 1 // [0 1]
 #endif
 #ifndef CHROMATIC_ABERRATION_STRENGTH
-#define CHROMATIC_ABERRATION_STRENGTH 0.6 // [0.0 0.35 0.6 1.0 1.5]
+#define CHROMATIC_ABERRATION_STRENGTH 1.5 // [0.0 0.35 0.6 1.0 1.5]
 #endif
 
 // 抖动（dither）。用噪声打散色带，避免天空等渐变区域出现条纹。
