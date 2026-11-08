@@ -5,22 +5,22 @@
 # ==============================================================================
 
 # ---- 页面标题 ----
-screen.SHADOWS = 阴影
-screen.LIGHTING = 光照
-screen.WORLD = 世界
-screen.POST = 后处理
-screen.DEBUG = 调试
+screen.SHADOWS=阴影参数
+screen.LIGHTING=光照
+screen.WORLD=环境
+screen.POST=后处理
+screen.DEBUG=调试
 
 # ---- 阴影 ----
 option.ENABLE_SHADOWS = 启用阴影
-option.SHADOW_SOFTNESS = 阴影柔和度
+option.SHADOW_SOFTNESS=阴影过滤
 option.SHADOW_MAP_BIAS = 阴影畸变
 option.SHADOW_BIAS = 阴影偏移
 
 # ---- 光照 ----
 option.AMBIENT_STRENGTH = 环境光强度
-option.SUNLIGHT_STRENGTH = 直射光强度
-option.SKY_TINT = 天空色染色
+option.SUNLIGHT_STRENGTH=日光强度
+option.SKY_TINT=天空染色
 
 # ---- 世界 ----
 option.FOG_DENSITY = 雾浓度
@@ -34,7 +34,7 @@ option.ENABLE_WATER_WAVES = 水面波浪
 
 # ---- 后处理 ----
 option.TONEMAP_MODE = 色调映射
-option.EXPOSURE = 曝光
+option.EXPOSURE=曝光补偿
 option.SATURATION = 饱和度
 option.CONTRAST = 对比度
 option.VIGNETTE = 暗角
@@ -42,7 +42,7 @@ option.ENABLE_BLOOM = 泛光
 option.BLOOM_THRESHOLD = 泛光阈值
 option.BLOOM_STRENGTH = 泛光强度
 option.BLOOM_RADIUS = 泛光半径
-option.ENABLE_DITHER = 抖动
+option.ENABLE_DITHER=色阶抖动
 
 # ---- 调试 ----
 option.DEBUG_VIEW = 调试视图
@@ -55,8 +55,8 @@ option.WATER_REFLECTION_MOTION_BLUR.comment=按BSL方式平滑移动中的倒影
 screen.WATER=水体
 option.ENABLE_WATER_TEXTURE=水面纹理
 option.WATER_COLOR_LIGHTNESS=水色浅淡程度
-option.WATER_REFLECTION_BRIGHTNESS=倒影亮度
-option.WATER_SPECULAR_STRENGTH=日月高光强度
+option.WATER_REFLECTION_BRIGHTNESS=倒影亮度补偿
+option.WATER_SPECULAR_STRENGTH=水面高光强度
 option.BLOCK_LIGHT_STRENGTH=方块光强度
 option.SMOOTH_BLOCK_LIGHT=平滑方块光
 option.ENABLE_COLOURED_LIGHTING=彩色光照
@@ -68,7 +68,7 @@ value.ENABLE_COLOURED_LIGHTING.0=关闭
 value.ENABLE_COLOURED_LIGHTING.1=开启
 
 option.WATER_SURFACE_OPACITY=水面散射不透明度
-screen.WEATHER=雨天
+screen.WEATHER=天气
 option.RAIN_PUDDLES_STRENGTH=地表积水强度
 option.ENABLE_REALISTIC_RAIN=真实雨滴
 option.ENABLE_REALISTIC_RAIN.comment=使用窄雨丝和下落短滴；关闭后恢复原版雨纹。雨雪遮挡继续使用游戏几何。
@@ -79,7 +79,7 @@ option.RAIN_RIPPLE_STRENGTH.comment=雨滴在水体和积水中形成逐渐扩�
 option.RAIN_FOG_STRENGTH=山林雨雾强度
 option.WATER_ABSORPTION=水体吸收强度
 option.WATER_REFRACTION_STRENGTH=水体折射强度
-option.WATER_REFRACTION_STRENGTH.comment=控制水上水底位移与水下出射折射；临界角全反射继续保留，水波影响窗口边缘。
+option.WATER_REFRACTION_STRENGTH.comment=在直通与水体折射率之间插值；水底浅化与水下窗口由同一次折射求解产生。
 
 option.WATER_TURBIDITY=水体浑浊度
 
@@ -100,12 +100,12 @@ option.WATER_CAUSTICS_STRENGTH=水体焦散强度
 option.UNDERWATER_SHAFT_STRENGTH=水下光柱强度
 
 option.MOONLIGHT_STRENGTH=月光强度
-option.BLOCK_LIGHT_FALLOFF=局部光衰减
+option.BLOCK_LIGHT_FALLOFF=方块光衰减
 option.CLOUD_NIGHT_BRIGHTNESS=夜云亮度
 option.MOONLIGHT_STRENGTH.comment=月光独立于日光强度；默认值使附近方块光明显强于月光。
 option.BLOCK_LIGHT_FALLOFF.comment=值越大，局部光源外围衰减越快；墙体遮挡继续由原版传播场控制。
 option.CLOUD_NIGHT_BRIGHTNESS.comment=只调节夜间云的照明，不改变云的半透明度和形状。
-screen.SKY=真实天空
+screen.SKY=天空
 screen.CLOUDS=体积云
 option.SKY_HAZE=大气气溶胶
 option.SKY_EXPOSURE=天空亮度
@@ -121,13 +121,13 @@ option.CLOUD_BRIGHTNESS=云体亮度
 option.CLOUD_SHADOW_STRENGTH=云影强度
 option.CLOUD_SIZE=云团尺度
 option.CELESTIAL_SIZE.comment=1.0 接近原版亮主体的大小，太阳约 8.6 度、满月约 5.7 度。
-option.CLOUD_QUALITY.comment=低、均衡、高分别使用 24、40、64 次视线采样。云始终按半分辨率绘制。
+option.CLOUD_QUALITY.comment=控制体积云积分采样。内部视口由高级参数中的体积场分辨率控制。
 option.CLOUD_COVERAGE.comment=控制天气场的云覆盖，不会改变云层高度。
 
-option.NIGHT_AMBIENT_STRENGTH=夜间环境亮度
-option.NIGHT_EXPOSURE=夜间曝光倍率
+option.NIGHT_AMBIENT_STRENGTH=夜间环境光
+option.NIGHT_EXPOSURE=手动夜景补偿
 
-screen.LOCAL_LIGHTS=彩色光照
+screen.LOCAL_LIGHTS=方块光
 screen.GI=全局光照
 option.ENABLE_COMPANION_LIGHTING=配套光照系统
 option.ENABLE_LOCAL_SHADOWS=独立光源阴影
@@ -143,22 +143,22 @@ option.GI_VOLUME_SIZE=光照体积边长
 option.GI_PROPAGATION_STEPS=每次反弹传播步数
 option.GI_WORK_PER_FRAME=每帧传播预算
 option.GI_STRENGTH=间接光强度
-option.GI_QUALITY=GI计算质量
-option.GI_MULTIBOUNCE=多次反弹
-option.GI_REFLECTANCE=间接光反射比例
+option.GI_QUALITY=全局光照质量
+option.GI_MULTIBOUNCE=多次间接反弹
+option.GI_REFLECTANCE=反弹反照率
 
-option.AIR_SCATTER_STRENGTH=日光散射强度
+option.AIR_SCATTER_STRENGTH=日光体积散射
 option.AIR_SCATTER_STRENGTH.comment=低角度日照更明显，0 关闭；需要启用阴影。
 
 option.ENABLE_LENS_FLARE=镜头光晕
 option.LENS_FLARE_STRENGTH=镜头光晕强度
-option.ENABLE_CHROMATIC_ABERRATION=色差
+option.ENABLE_CHROMATIC_ABERRATION=镜头色差
 option.CHROMATIC_ABERRATION_STRENGTH=色差强度
 
 option.LENS_FLARE_STRENGTH.comment=太阳可见时产生轻度鬼影与星芒，遮挡、夜间和水下自动关闭。
 option.CHROMATIC_ABERRATION_STRENGTH.comment=从画面中心向边缘逐渐增强；0.6 为轻度色差，0 关闭。
 
-option.MIN_AMBIENT_LIGHT=基础环境亮度
+option.MIN_AMBIENT_LIGHT=暗处亮度下限
 option.MIN_AMBIENT_LIGHT.comment=无天光的矿洞也保留低亮度，已有照明充足时不额外提亮。
 
 # ---- 画质预设 ----
@@ -175,10 +175,10 @@ option.shadowDistance = 阴影距离
 option.WATER_REFLECTION_CLOUDS = 倒影体积云
 value.WATER_REFLECTION_CLOUDS.0 = 查表
 value.WATER_REFLECTION_CLOUDS.1 = 逐像素
-option.WATER_REFLECTION_STEPS = 倒影步数
-option.WATER_REFLECTION_STEPS.comment=控制屏幕空间反射的查询预算。32 及以上同时提高屏外环境捕获的精度。
-option.REFLECTION_OCCLUSION_STEPS = 倒影遮挡步数
-option.REFLECTION_OCCLUSION_STEPS.comment=沿阴影贴图找出桥底、树冠下方等相机看不到的遮挡，避免倒影露出天空。水面与材质倒影共用，0 为关闭。
+option.WATER_REFLECTION_STEPS=水体追踪步数
+option.WATER_REFLECTION_STEPS.comment=控制水体透射追踪及相关缓存预算；水面SSR沿用BSL固定追踪预算。
+option.REFLECTION_OCCLUSION_STEPS=光学辅助步数
+option.REFLECTION_OCCLUSION_STEPS.comment=控制折射辅助视图中的表面搜索。0与6均采用六步最低预算，旧设置继续兼容。
 
 option.BLOOM_RESOLUTION=泛光分辨率
 value.BLOOM_RESOLUTION.0=半分辨率
@@ -195,13 +195,13 @@ option.FOLIAGE_TRANSLUCENCY.comment=树叶、草木和庄稼的日月逆光透�
 option.VOLUMETRIC_RESOLUTION=体积场分辨率
 value.VOLUMETRIC_RESOLUTION.0=四分之一
 value.VOLUMETRIC_RESOLUTION.1=二分之一
-option.VOLUMETRIC_RESOLUTION.comment=云、空气散射和水下光柱的内部视口。四分之一减少约 75% 的体积片元，细节会变粗；不降低场景分辨率。
+option.VOLUMETRIC_RESOLUTION.comment=低档以四分之一宽高生成体积场，高档为二分之一宽高；深度约束重建保留边界。
 
 # Materials and dimension environments
 screen.MATERIALS=材质
 screen.DIMENSIONS=维度
-option.ENABLE_MATERIAL_REFLECTIONS=材质光泽
-option.MATERIAL_REFLECTION_STRENGTH=光泽强度
+option.ENABLE_MATERIAL_REFLECTIONS=PBR高光
+option.MATERIAL_REFLECTION_STRENGTH=材质高光强度
 option.MATERIAL_REFLECTION_STEPS=材质反射步数
 option.NETHER_AMBIENT=下界环境亮度
 option.END_AMBIENT=末地环境亮度
@@ -209,7 +209,7 @@ option.NETHER_FOG_DENSITY=下界雾密度
 option.END_FOG_DENSITY=末地雾密度
 
 # Terrain mist, aurora and dimension atmospheres
-screen.ATMOSPHERE=氛围
+screen.ATMOSPHERE=体积光与雾
 option.GROUND_FOG_STRENGTH=地面雾强度
 option.GROUND_FOG_HEIGHT=地面雾高度
 option.ATMOSPHERE_STEPS=近景介质步数
@@ -220,25 +220,25 @@ option.TWILIGHT_STRENGTH=晨昏氛围强度
 option.NETHER_ATMOSPHERE=下界烟霭氛围
 option.END_ATMOSPHERE=末地星云氛围
 
-option.ORE_GLOW_STRENGTH = 材质自发光强度
-option.ORE_GLOW_STRENGTH.comment = 读取资源包LabPBR高光贴图的自发光通道；0关闭，不需要配套Mod。
+option.ORE_GLOW_STRENGTH=自发光强度
+option.ORE_GLOW_STRENGTH.comment=缩放LabPBR材质中的自发光通道，适用于矿物及其他发光材质。
 
-option.POM_QUALITY=地形视差质量
-option.POM_DISTANCE=视差可见距离
+option.POM_QUALITY=视差遮蔽贴图
+option.POM_DISTANCE=视差距离
 
-option.MATERIAL_GLOSS_ROUGHNESS=Glossy粗糙度下限
+option.MATERIAL_GLOSS_ROUGHNESS=最低粗糙度
 option.MATERIAL_ANISOTROPY=各向异性强度
 
-option.COLOURED_VOLUME_SIZE=光照体积范围
-option.COLOURED_LIGHT_STEPS=彩色光照更新
-option.COLOURED_LIGHT_INTENSITY=彩色光照强度
-option.GI_QUALITY.comment=0关闭；1、2、3每帧分别更新1、2、3次。提高后收敛更快，开销增加。
+option.COLOURED_VOLUME_SIZE=局部光照范围
+option.COLOURED_LIGHT_STEPS=光照传播步数
+option.COLOURED_LIGHT_INTENSITY=彩色光混合
+option.GI_QUALITY.comment=控制间接光的每帧传播预算与精度；提高后收敛更快，开销增加。
 option.GI_MULTIBOUNCE.comment=允许间接光在表面继续反射；关闭后仅保留一次表面反射。
 option.GI_STRENGTH.comment=只调整间接光亮度；0隐藏GI，但不停止体素更新。
 option.GI_REFLECTANCE.comment=后续反弹的能量保留比例，与材质颜色共同限制能量。
 option.ENABLE_COLOURED_LIGHTING.comment=启用附近光源的彩色直射；关闭后保留普通方块照明。GI开启时仍运行共享体素计算。
-option.COLOURED_VOLUME_SIZE.comment=GI和彩光共享的水平边长，竖直范围为一半；范围外保留原有环境光和方块照明。
-option.COLOURED_LIGHT_STEPS.comment=每帧传播次数；增加后光照随移动和编辑收敛更快。
+option.COLOURED_VOLUME_SIZE.comment=彩色光与GI共享的水平体积边长，垂直范围为一半。
+option.COLOURED_LIGHT_STEPS.comment=彩色光与间接光使用的每帧传播次数；增加后收敛更快，开销也增加。
 option.WATER_WAVE_STRENGTH = 水波强度
 option.WATER_WAVE_STRENGTH.comment = 调整波高和水面细波的明暗对比。
 
@@ -261,8 +261,7 @@ value.ENABLE_TAA.0=关闭
 value.ENABLE_TAA.1=开启
 option.ENABLE_TAA.comment=独立控制时域累积、投影抖动与 TAA 锐化。关闭后使用 FXAA 选项；切换画质预设不会覆盖此开关。
 
-screen.TEMPORAL=时域抗锯齿
-screen.CAMERA=镜头
+screen.CAMERA=景深与模糊
 screen.EXPOSURE=曝光
 screen.BLOOM=泛光
 screen.GRADING=调色
@@ -305,8 +304,8 @@ value.COLOR_GRADE.0=中性
 value.COLOR_GRADE.1=自然
 value.COLOR_GRADE.2=电影
 option.COLOR_GRADE_STRENGTH=调色强度
-option.WHITE_BALANCE=白平衡
-option.WHITE_BALANCE.comment=负值偏冷、正值偏暖；保持场景亮度，不替代曝光补偿。
+option.WHITE_BALANCE=白平衡偏移
+option.WHITE_BALANCE.comment=负值偏冷，正值偏暖；白平衡调整保持亮度。
 option.BLOOM_SCATTER=泛光扩散
 option.BLOOM_SCATTER.comment=在窄光晕和四级低频光晕之间分配权重，0 保留窄光晕。
 
@@ -317,3 +316,67 @@ value.SSAO_QUALITY.1=快速
 value.SSAO_QUALITY.2=高质量
 option.SSAO_STRENGTH=AO强度
 option.SSAO_STRENGTH.comment=调整接触处的间接光遮蔽程度，直射照明与材质自发光独立保留。
+
+screen.WATER_APPEARANCE=水面外观
+screen.UNDERWATER=水下
+screen.ANTIALIASING=抗锯齿
+screen.LENS=镜头特效
+screen.ADVANCED=高级参数
+screen.LIGHTING_BUDGET=光照预算
+screen.WORLD_BUDGET=环境预算
+screen.WATER_BUDGET=水体预算
+screen.POST_BUDGET=后处理参数
+option.EXPOSURE.comment=在自动曝光或手动曝光之后施加的亮度倍率，1.0为无补偿。
+option.NIGHT_EXPOSURE.comment=手动曝光时的夜景暗部补偿；开启自动曝光时不使用。
+option.ENABLE_DITHER.comment=在最终颜色编码后加入微弱色阶抖动，减轻色带。
+option.SHADOW_SOFTNESS.comment=控制遮挡搜索和阴影过滤质量；硬阴影档保留阴影并减少采样。
+option.COLOURED_LIGHT_INTENSITY.comment=在原版方块光与彩色结果之间混合。0保留原版颜色，1完整应用彩色光。
+option.WATER_REFLECTION_BRIGHTNESS.comment=缩放倒影辐射亮度；水面反射强度单独控制混合权重。
+option.ENABLE_MATERIAL_REFLECTIONS.comment=启用资源包材质的粗糙环境反射与直射高光。
+option.MATERIAL_GLOSS_ROUGHNESS.comment=限制材质可达到的最小粗糙度；提高后高光更宽。
+value.GI_QUALITY.0=关闭
+value.GI_QUALITY.1=低
+value.GI_QUALITY.2=中
+value.GI_QUALITY.3=高
+value.POM_QUALITY.0=关闭
+value.POM_QUALITY.1=低
+value.POM_QUALITY.2=中
+value.POM_QUALITY.3=高
+value.SHADOW_SOFTNESS.0=硬阴影
+value.SHADOW_SOFTNESS.1=柔和
+value.SHADOW_SOFTNESS.2=高质量
+value.ENABLE_LENS_FLARE.0=关闭
+value.ENABLE_LENS_FLARE.1=开启
+value.ENABLE_WATER_WAVES.0=关闭
+value.ENABLE_WATER_WAVES.1=开启
+value.ENABLE_MOTION_BLUR.0=关闭
+value.ENABLE_MOTION_BLUR.1=开启
+value.ENABLE_CHROMATIC_ABERRATION.0=关闭
+value.ENABLE_CHROMATIC_ABERRATION.1=开启
+value.ENABLE_DITHER.0=关闭
+value.ENABLE_DITHER.1=开启
+value.ENABLE_DOF.0=关闭
+value.ENABLE_DOF.1=开启
+value.WATER_REFLECTION_MOTION_BLUR.0=关闭
+value.WATER_REFLECTION_MOTION_BLUR.1=开启
+value.ENABLE_LIGHTNING.0=关闭
+value.ENABLE_LIGHTNING.1=开启
+value.GI_MULTIBOUNCE.0=关闭
+value.GI_MULTIBOUNCE.1=开启
+value.ENABLE_SHADOWS.0=关闭
+value.ENABLE_SHADOWS.1=开启
+value.ENABLE_REALISTIC_RAIN.0=关闭
+value.ENABLE_REALISTIC_RAIN.1=开启
+value.ENABLE_BLOOM.0=关闭
+value.ENABLE_BLOOM.1=开启
+value.ENABLE_CHUNK_TRANSITION.0=关闭
+value.ENABLE_CHUNK_TRANSITION.1=开启
+value.ENABLE_MATERIAL_REFLECTIONS.0=关闭
+value.ENABLE_MATERIAL_REFLECTIONS.1=开启
+value.ENABLE_AUTO_EXPOSURE.0=关闭
+value.ENABLE_AUTO_EXPOSURE.1=开启
+value.ENABLE_RAIN_PUDDLES.0=关闭
+value.ENABLE_RAIN_PUDDLES.1=开启
+value.TONEMAP_MODE.0=关闭（截断）
+value.TONEMAP_MODE.1=ACES
+value.TONEMAP_MODE.2=Reinhard

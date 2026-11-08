@@ -11,22 +11,22 @@
 # ==============================================================================
 
 # ---- 页面标题 ----
-screen.SHADOWS = Shadows
-screen.LIGHTING = Lighting
-screen.WORLD = World
-screen.POST = Post Processing
-screen.DEBUG = Debug
+screen.SHADOWS=Shadow Parameters
+screen.LIGHTING=Lighting
+screen.WORLD=Environment
+screen.POST=Post Processing
+screen.DEBUG=Debug
 
 # ---- 阴影 ----
 option.ENABLE_SHADOWS = Enable Shadows
-option.SHADOW_SOFTNESS = Shadow Softness
+option.SHADOW_SOFTNESS=Shadow Filtering
 option.SHADOW_MAP_BIAS = Shadow Distortion
 option.SHADOW_BIAS = Shadow Bias
 
 # ---- 光照 ----
 option.AMBIENT_STRENGTH = Ambient Strength
-option.SUNLIGHT_STRENGTH = Sunlight Strength
-option.SKY_TINT = Sky Ambient Tint
+option.SUNLIGHT_STRENGTH=Sunlight Strength
+option.SKY_TINT=Sky Tint
 
 # ---- 世界 ----
 option.FOG_DENSITY = Fog Density
@@ -40,7 +40,7 @@ option.ENABLE_WATER_WAVES = Water Waves
 
 # ---- 后处理 ----
 option.TONEMAP_MODE = Tone Mapping
-option.EXPOSURE = Exposure
+option.EXPOSURE=Exposure Compensation
 option.SATURATION = Saturation
 option.CONTRAST = Contrast
 option.VIGNETTE = Vignette
@@ -48,7 +48,7 @@ option.ENABLE_BLOOM = Bloom
 option.BLOOM_THRESHOLD = Bloom Threshold
 option.BLOOM_STRENGTH = Bloom Strength
 option.BLOOM_RADIUS = Bloom Radius
-option.ENABLE_DITHER = Dithering
+option.ENABLE_DITHER=Color Dithering
 
 # ---- 调试 ----
 option.DEBUG_VIEW = Debug View
@@ -62,7 +62,7 @@ screen.WATER=Water
 option.ENABLE_WATER_TEXTURE=Water Texture
 option.WATER_COLOR_LIGHTNESS=Water Color Lightness
 option.WATER_REFLECTION_BRIGHTNESS=Reflection Brightness
-option.WATER_SPECULAR_STRENGTH=Sun/Moon Highlight Strength
+option.WATER_SPECULAR_STRENGTH=Water Highlight Strength
 option.BLOCK_LIGHT_STRENGTH=Block Light Strength
 option.SMOOTH_BLOCK_LIGHT=Smooth Block Lighting
 option.ENABLE_COLOURED_LIGHTING=Coloured Lighting
@@ -74,7 +74,7 @@ value.ENABLE_COLOURED_LIGHTING.0=Off
 value.ENABLE_COLOURED_LIGHTING.1=On
 
 option.WATER_SURFACE_OPACITY=Surface Scattering Opacity
-screen.WEATHER=Rain
+screen.WEATHER=Weather
 option.RAIN_PUDDLES_STRENGTH=Ground Wetness and Puddles
 option.ENABLE_REALISTIC_RAIN=Realistic Raindrops
 option.ENABLE_REALISTIC_RAIN.comment=Thin streaks and falling short drops on native weather geometry. Disable to restore the vanilla rain texture.
@@ -85,7 +85,7 @@ option.RAIN_RIPPLE_STRENGTH.comment=Expanding rain rings on water and puddles. Z
 option.RAIN_FOG_STRENGTH=Terrain Rain Fog
 option.WATER_ABSORPTION=Water Absorption
 option.WATER_REFRACTION_STRENGTH=Water Refraction Strength
-option.WATER_REFRACTION_STRENGTH.comment=Controls the refracted bed and underwater exit view. Total internal reflection remains active, with waves affecting the window edge.
+option.WATER_REFRACTION_STRENGTH.comment=Interpolates between straight transmission and the water IOR. Apparent depth and the underwater window use the same refraction solve.
 
 option.WATER_TURBIDITY=Water Turbidity
 
@@ -106,12 +106,12 @@ option.WATER_CAUSTICS_STRENGTH=Water Caustics Strength
 option.UNDERWATER_SHAFT_STRENGTH=Underwater Sun Shafts
 
 option.MOONLIGHT_STRENGTH=Moonlight Strength
-option.BLOCK_LIGHT_FALLOFF=Local Light Falloff
+option.BLOCK_LIGHT_FALLOFF=Block Light Falloff
 option.CLOUD_NIGHT_BRIGHTNESS=Night Cloud Brightness
 option.MOONLIGHT_STRENGTH.comment=Controls moonlight independently from sunlight.
 option.BLOCK_LIGHT_FALLOFF.comment=Higher values dim the outer local light field more quickly.
 option.CLOUD_NIGHT_BRIGHTNESS.comment=Scales night cloud illumination without changing opacity or shape.
-screen.SKY=Physical Sky
+screen.SKY=Sky
 screen.CLOUDS=Volumetric Clouds
 option.SKY_HAZE=Aerosol Haze
 option.SKY_EXPOSURE=Sky Brightness
@@ -129,10 +129,10 @@ option.CLOUD_SIZE=Cloud Shape Scale
 
 option.CELESTIAL_SIZE.comment=1.0 approximates vanilla bright-core sizes: Sun 8.6 degrees, Moon 5.7 degrees.
 
-option.NIGHT_AMBIENT_STRENGTH=Night Ambient Strength
-option.NIGHT_EXPOSURE=Night Exposure
+option.NIGHT_AMBIENT_STRENGTH=Night Ambient Light
+option.NIGHT_EXPOSURE=Manual Night Compensation
 
-screen.LOCAL_LIGHTS=Colored Lighting
+screen.LOCAL_LIGHTS=Block Lighting
 screen.GI=Global Illumination
 option.ENABLE_COMPANION_LIGHTING=Companion Lighting
 option.ENABLE_LOCAL_SHADOWS=Per-Light Shadows
@@ -148,11 +148,11 @@ option.GI_VOLUME_SIZE=Lighting Volume Size
 option.GI_PROPAGATION_STEPS=Propagation Steps Per Bounce
 option.GI_WORK_PER_FRAME=Propagation Budget Per Frame
 option.GI_STRENGTH=Indirect Light Strength
-option.GI_QUALITY=GI Update Quality
-option.GI_MULTIBOUNCE=Multiple Bounces
-option.GI_REFLECTANCE=Diffuse Reflection Fraction
+option.GI_QUALITY=GI Quality
+option.GI_MULTIBOUNCE=Multiple GI Bounces
+option.GI_REFLECTANCE=Bounce Reflectance
 
-option.AIR_SCATTER_STRENGTH=Sunlight Scattering Strength
+option.AIR_SCATTER_STRENGTH=Sunlight Volumetrics
 option.AIR_SCATTER_STRENGTH.comment=More visible in low-angle sunlight. Set to 0 to disable. Requires shadows.
 
 option.ENABLE_LENS_FLARE=Lens Flare
@@ -180,10 +180,10 @@ option.shadowDistance = Shadow Distance
 option.WATER_REFLECTION_CLOUDS = Reflected Clouds
 value.WATER_REFLECTION_CLOUDS.0 = Lookup
 value.WATER_REFLECTION_CLOUDS.1 = Per-pixel
-option.WATER_REFLECTION_STEPS = Reflection Steps
-option.WATER_REFLECTION_STEPS.comment=Controls the screen-space reflection query budget. Values of 32 or higher also increase local environment capture resolution.
-option.REFLECTION_OCCLUSION_STEPS = Reflection Occlusion Steps
-option.REFLECTION_OCCLUSION_STEPS.comment=Marches the shadow map to find occluders the camera cannot see, such as bridge undersides and tree canopies, so reflections do not show sky. Shared by water and material reflections; 0 disables it.
+option.WATER_REFLECTION_STEPS=Water Trace Steps
+option.WATER_REFLECTION_STEPS.comment=Controls water transmission tracing and related cache budgets. Surface SSR retains the fixed BSL search budget.
+option.REFLECTION_OCCLUSION_STEPS=Secondary Optical Steps
+option.REFLECTION_OCCLUSION_STEPS.comment=Controls the secondary-view search for refractive surfaces. Legacy 0 and 6 both select the six-step minimum.
 
 option.BLOOM_RESOLUTION=Bloom Resolution
 value.BLOOM_RESOLUTION.0=Half
@@ -200,13 +200,13 @@ option.FOLIAGE_TRANSLUCENCY.comment=Sun and moon transmission through thin leave
 option.VOLUMETRIC_RESOLUTION=Volume Resolution
 value.VOLUMETRIC_RESOLUTION.0=Quarter
 value.VOLUMETRIC_RESOLUTION.1=Half
-option.VOLUMETRIC_RESOLUTION.comment=Cloud, air and underwater volume viewports. Quarter uses about 75% fewer volume fragments with coarser detail. Scene resolution is unchanged.
+option.VOLUMETRIC_RESOLUTION.comment=Uses quarter or half width and height for the volume field, followed by depth-aware reconstruction.
 
 # Materials and dimension environments
 screen.MATERIALS=Materials
 screen.DIMENSIONS=Dimensions
-option.ENABLE_MATERIAL_REFLECTIONS=Material Gloss
-option.MATERIAL_REFLECTION_STRENGTH=Gloss Strength
+option.ENABLE_MATERIAL_REFLECTIONS=PBR Highlights
+option.MATERIAL_REFLECTION_STRENGTH=Material Highlight Strength
 option.MATERIAL_REFLECTION_STEPS=Material Reflection Steps
 option.NETHER_AMBIENT=Nether Ambient Light
 option.END_AMBIENT=End Ambient Light
@@ -214,7 +214,7 @@ option.NETHER_FOG_DENSITY=Nether Fog Density
 option.END_FOG_DENSITY=End Fog Density
 
 # Terrain mist, aurora and dimension atmospheres
-screen.ATMOSPHERE=Atmosphere
+screen.ATMOSPHERE=Volumetric Light and Fog
 option.GROUND_FOG_STRENGTH=Terrain Mist Strength
 option.GROUND_FOG_HEIGHT=Terrain Mist Height
 option.ATMOSPHERE_STEPS=Local Atmosphere Steps
@@ -225,25 +225,25 @@ option.TWILIGHT_STRENGTH=Twilight Atmosphere
 option.NETHER_ATMOSPHERE=Nether Haze Atmosphere
 option.END_ATMOSPHERE=End Nebula Atmosphere
 
-option.ORE_GLOW_STRENGTH = Material Emission
-option.ORE_GLOW_STRENGTH.comment = Uses the resource pack LabPBR emission channel; zero disables it. No companion Mod required.
+option.ORE_GLOW_STRENGTH=Emission Strength
+option.ORE_GLOW_STRENGTH.comment=Scales the LabPBR emission channel for ores and other emissive materials.
 
-option.POM_QUALITY=Terrain Parallax Quality
+option.POM_QUALITY=Parallax Occlusion Mapping
 option.POM_DISTANCE=Parallax Distance
 
-option.MATERIAL_GLOSS_ROUGHNESS=Gloss Roughness Floor
+option.MATERIAL_GLOSS_ROUGHNESS=Minimum Roughness
 option.MATERIAL_ANISOTROPY=Anisotropy Strength
 
-option.COLOURED_VOLUME_SIZE=Light Volume Range
-option.COLOURED_LIGHT_STEPS=Colored Light Updates
-option.COLOURED_LIGHT_INTENSITY=Colored Light Intensity
-option.GI_QUALITY.comment=0 disables GI; 1, 2 and 3 perform that many transport steps per frame. More work converges faster.
+option.COLOURED_VOLUME_SIZE=Local Lighting Range
+option.COLOURED_LIGHT_STEPS=Light Propagation Steps
+option.COLOURED_LIGHT_INTENSITY=Colored Light Blend
+option.GI_QUALITY.comment=Controls the per-frame budget and precision of indirect transport. Higher quality converges faster at greater cost.
 option.GI_MULTIBOUNCE.comment=Reflect indirect light again at surfaces. Disable for a single surface bounce.
 option.GI_STRENGTH.comment=Scales indirect light only. Zero hides GI while keeping transport active.
 option.GI_REFLECTANCE.comment=Energy retained by later surface reflections, multiplied by material albedo.
 option.ENABLE_COLOURED_LIGHTING.comment=Enable direct light colors. Ordinary block lighting remains when disabled; GI retains shared voxel work.
-option.COLOURED_VOLUME_SIZE.comment=Shared GI and colored-light horizontal extent; vertical extent is half. Existing lighting remains outside.
-option.COLOURED_LIGHT_STEPS.comment=Updates per frame. More updates converge faster after movement and block edits.
+option.COLOURED_VOLUME_SIZE.comment=Horizontal extent shared by colored lighting and GI. Vertical extent is half this value.
+option.COLOURED_LIGHT_STEPS.comment=Propagation passes per frame shared by colored lighting and indirect transport. More passes converge faster at higher cost.
 option.WATER_WAVE_STRENGTH = Wave strength
 option.WATER_WAVE_STRENGTH.comment = Controls moving wave height and visible ripple contrast.
 
@@ -266,11 +266,10 @@ value.ENABLE_TAA.0=Off
 value.ENABLE_TAA.1=On
 option.ENABLE_TAA.comment=Independently controls temporal accumulation, projection jitter and TAA sharpening. Disabling uses the FXAA setting; quality presets preserve this switch.
 
-screen.TEMPORAL=Temporal AA
-screen.CAMERA=Camera
+screen.CAMERA=Depth of Field and Motion Blur
 screen.EXPOSURE=Exposure
 screen.BLOOM=Bloom
-screen.GRADING=Colour grading
+screen.GRADING=Color Grading
 option.ENABLE_CHUNK_TRANSITION=Smooth chunk transition
 option.ENABLE_CHUNK_TRANSITION.comment=Blends the render-distance boundary with directional sky; supported Iris versions also fade newly loaded chunk coverage.
 option.CHUNK_TRANSITION_WIDTH=Boundary transition width
@@ -310,8 +309,8 @@ value.COLOR_GRADE.0=Neutral
 value.COLOR_GRADE.1=Natural
 value.COLOR_GRADE.2=Cinematic
 option.COLOR_GRADE_STRENGTH=Grade strength
-option.WHITE_BALANCE=White balance
-option.WHITE_BALANCE.comment=Negative values cool the image; positive values warm it. Scene luminance is preserved.
+option.WHITE_BALANCE=White Balance
+option.WHITE_BALANCE.comment=Negative values cool the image; positive values warm it while preserving luminance.
 option.BLOOM_SCATTER=Bloom scatter
 option.BLOOM_SCATTER.comment=Distributes weight between a narrow glow and four low-frequency levels. Zero keeps the narrow glow.
 
@@ -322,3 +321,68 @@ value.SSAO_QUALITY.1=Fast
 value.SSAO_QUALITY.2=High
 option.SSAO_STRENGTH=AO Strength
 option.SSAO_STRENGTH.comment=Controls indirect-light shading at contacts. Direct illumination and material emission remain independent.
+
+screen.WATER_APPEARANCE=Water Appearance
+screen.UNDERWATER=Underwater
+screen.ANTIALIASING=Anti-Aliasing
+screen.LENS=Lens Effects
+screen.ADVANCED=Advanced
+screen.LIGHTING_BUDGET=Lighting Budget
+screen.WORLD_BUDGET=Environment Budget
+screen.WATER_BUDGET=Water Budget
+screen.POST_BUDGET=Post Parameters
+option.EXPOSURE.comment=Brightness multiplier after automatic or manual metering. 1.0 applies no compensation.
+option.NIGHT_EXPOSURE.comment=Night shadow lift for manual exposure. Automatic exposure uses its own night limit.
+option.ENABLE_DITHER.comment=Adds subtle output dithering to reduce color banding.
+option.SHADOW_SOFTNESS.comment=Controls blocker search and shadow filtering. Hard shadows retain occlusion with fewer samples.
+option.CLOUD_QUALITY.comment=Controls cloud ray-march samples. The volume resolution setting controls the internal viewport.
+option.COLOURED_LIGHT_INTENSITY.comment=Blends native block lighting with colored results. 0 keeps native colors; 1 applies the full colored result.
+option.WATER_REFLECTION_BRIGHTNESS.comment=Scales reflected radiance. Water reflection strength controls the separate blend weight.
+option.ENABLE_MATERIAL_REFLECTIONS.comment=Enables rough environment response and direct highlights from resource-pack PBR materials.
+option.MATERIAL_GLOSS_ROUGHNESS.comment=Limits the minimum material roughness. Higher values broaden highlights.
+value.GI_QUALITY.0=Off
+value.GI_QUALITY.1=Low
+value.GI_QUALITY.2=Medium
+value.GI_QUALITY.3=High
+value.POM_QUALITY.0=Off
+value.POM_QUALITY.1=Low
+value.POM_QUALITY.2=Medium
+value.POM_QUALITY.3=High
+value.SHADOW_SOFTNESS.0=Hard
+value.SHADOW_SOFTNESS.1=Soft
+value.SHADOW_SOFTNESS.2=High
+value.ENABLE_LENS_FLARE.0=Off
+value.ENABLE_LENS_FLARE.1=On
+value.ENABLE_WATER_WAVES.0=Off
+value.ENABLE_WATER_WAVES.1=On
+value.ENABLE_MOTION_BLUR.0=Off
+value.ENABLE_MOTION_BLUR.1=On
+value.ENABLE_CHROMATIC_ABERRATION.0=Off
+value.ENABLE_CHROMATIC_ABERRATION.1=On
+value.ENABLE_DITHER.0=Off
+value.ENABLE_DITHER.1=On
+value.ENABLE_DOF.0=Off
+value.ENABLE_DOF.1=On
+value.WATER_REFLECTION_MOTION_BLUR.0=Off
+value.WATER_REFLECTION_MOTION_BLUR.1=On
+value.ENABLE_LIGHTNING.0=Off
+value.ENABLE_LIGHTNING.1=On
+value.GI_MULTIBOUNCE.0=Off
+value.GI_MULTIBOUNCE.1=On
+value.ENABLE_SHADOWS.0=Off
+value.ENABLE_SHADOWS.1=On
+value.ENABLE_REALISTIC_RAIN.0=Off
+value.ENABLE_REALISTIC_RAIN.1=On
+value.ENABLE_BLOOM.0=Off
+value.ENABLE_BLOOM.1=On
+value.ENABLE_CHUNK_TRANSITION.0=Off
+value.ENABLE_CHUNK_TRANSITION.1=On
+value.ENABLE_MATERIAL_REFLECTIONS.0=Off
+value.ENABLE_MATERIAL_REFLECTIONS.1=On
+value.ENABLE_AUTO_EXPOSURE.0=Off
+value.ENABLE_AUTO_EXPOSURE.1=On
+value.ENABLE_RAIN_PUDDLES.0=Off
+value.ENABLE_RAIN_PUDDLES.1=On
+value.TONEMAP_MODE.0=Off (Clipping)
+value.TONEMAP_MODE.1=ACES
+value.TONEMAP_MODE.2=Reinhard
